@@ -4,7 +4,7 @@ from app.models.artifact import Artifact, ArtifactVersion
 from app.models.file import UploadedFile
 from app.models.project import Project
 from app.models.source import Source
-from app.models.template_profile import TemplateProfile
+from app.models.template_profile import TemplateProfileRecord
 from app.models.trace import AgentTrace
 from app.models.user import User
 
@@ -15,6 +15,6 @@ __all__ = [
     "AgentTrace",
     "Project",
     "Source",
-    "TemplateProfile",
+    "TemplateProfileRecord",
     "User",
 ]

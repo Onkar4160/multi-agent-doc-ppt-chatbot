@@ -1,8 +1,9 @@
-"""File management API endpoints: upload and list files."""
+"""File management and analysis API endpoints: upload, list, analyze, and get profile."""
 
 from __future__ import annotations
 
-import os
+import json
+import time
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.core.config import get_settings
 from app.models.file import UploadedFile
+from app.models.template_profile import TemplateProfileRecord
+from app.models.trace import AgentTrace
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -25,10 +28,7 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Upload a document, presentation, or image template file.
-
-    Requires JWT auth. Allows only .docx, .pdf, .pptx, .png, .jpg, .jpeg up to max upload limit.
-    """
+    """Upload a document, presentation, or image template file."""
     settings = get_settings()
 
     if not file.filename:
@@ -44,7 +44,6 @@ async def upload_file(
             detail=f"Unsupported file type '{ext}'. Allowed types: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
-    # Read content and check size
     content = await file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -53,7 +52,6 @@ async def upload_file(
             detail=f"File size ({len(content)} bytes) exceeds maximum limit of {settings.max_upload_mb} MB",
         )
 
-    # Sanitize filename & save under storage/uploads/<uuid>/
     safe_filename = Path(file.filename).name
     file_uuid = str(uuid.uuid4())
     upload_dir = Path("storage/uploads") / file_uuid
@@ -102,3 +100,103 @@ async def list_files(
         }
         for f in files
     ]
+
+
+@router.post("/{file_id}/analyze")
+async def analyze_file(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Analyze an uploaded template file and store its TemplateProfile."""
+    result = await db.execute(select(UploadedFile).where(UploadedFile.id == file_id))
+    uploaded_file = result.scalar_one_or_none()
+
+    if uploaded_file is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with id {file_id} not found",
+        )
+
+    file_path = Path(uploaded_file.stored_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Stored file for id {file_id} missing on disk at '{uploaded_file.stored_path}'",
+        )
+
+    start_time = time.perf_counter()
+    agent_name = "doc_analyzer"
+
+    try:
+        if uploaded_file.file_type == "pptx":
+            from app.agents.ppt_analyzer import analyze_presentation
+            agent_name = "ppt_analyzer"
+            profile = analyze_presentation(file_path, file_id=file_id)
+        else:
+            from app.agents.doc_analyzer import analyze_document
+            profile = analyze_document(file_path, file_id=file_id)
+
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        profile_json = profile.model_dump_json()
+
+        # Save profile record
+        rec = TemplateProfileRecord(
+            file_id=file_id,
+            profile_json=profile_json,
+        )
+        db.add(rec)
+
+        # Log trace
+        trace = AgentTrace(
+            trace_id=str(uuid.uuid4()),
+            agent_name=agent_name,
+            input_summary=f"Analyze file {file_id}: '{uploaded_file.filename}' ({uploaded_file.file_type})",
+            output_summary=f"Successfully extracted TemplateProfile for '{uploaded_file.filename}'",
+            duration_ms=duration_ms,
+            status="ok",
+        )
+        db.add(trace)
+        await db.flush()
+
+        return profile.model_dump()
+
+    except Exception as exc:
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        trace_err = AgentTrace(
+            trace_id=str(uuid.uuid4()),
+            agent_name=agent_name,
+            input_summary=f"Analyze file {file_id}: '{uploaded_file.filename}'",
+            output_summary=f"Analysis failed: {str(exc)[:200]}",
+            duration_ms=duration_ms,
+            status="error",
+        )
+        db.add(trace_err)
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Template analysis failed: {exc}",
+        ) from exc
+
+
+@router.get("/{file_id}/profile")
+async def get_file_profile(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Retrieve stored TemplateProfile for an uploaded file."""
+    result = await db.execute(
+        select(TemplateProfileRecord)
+        .where(TemplateProfileRecord.file_id == file_id)
+        .order_by(TemplateProfileRecord.id.desc())
+    )
+    rec = result.scalar_one_or_none()
+
+    if rec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No profile found for file_id {file_id}. Run POST /files/{file_id}/analyze first.",
+        )
+
+    return json.loads(rec.profile_json)
