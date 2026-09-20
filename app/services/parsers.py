@@ -294,6 +294,8 @@ def parse_file(file_path: str | Path, ocr_scanned: bool = True) -> ParsedContent
         return parse_pdf(path, ocr_scanned=ocr_scanned)
     elif ext in (".png", ".jpg", ".jpeg"):
         return parse_image(path)
+    elif ext in (".txt", ".md"):
+        return parse_txt_md(path)
     else:
         raise ValueError(f"Unsupported file format '{ext}' for parsing")
 
@@ -328,4 +330,34 @@ def _extract_paragraph_font(p: docx.text.paragraph.Paragraph) -> FontInfo:
         bold=bold or False,
         italic=italic or False,
         color_hex=color_hex,
+    )
+
+
+def parse_txt_md(file_path: str | Path) -> ParsedContent:
+    """Parse plain text or Markdown file into ParsedContent."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    content = path.read_text(encoding="utf-8", errors="replace")
+    blocks: list[ParsedBlock] = []
+    lines = content.splitlines()
+
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+        if line_str.startswith("#"):
+            level = len(line_str) - len(line_str.lstrip("#"))
+            blocks.append(ParsedBlock(type="heading", text=line_str.lstrip("#").strip(), level=min(level, 6)))
+        else:
+            blocks.append(ParsedBlock(type="paragraph", text=line_str))
+
+    return ParsedContent(
+        file_type=path.suffix.lstrip(".").lower(),
+        blocks=blocks,
+        text_preview=content[:200],
+        page_or_slide_count=1,
+        is_scanned=False,
+        raw_text=content,
     )

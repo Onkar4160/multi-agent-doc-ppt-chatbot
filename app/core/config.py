@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
     pinecone_api_key: str = Field(default="", validation_alias="PINECONE_API_KEY")
     pinecone_index: str = Field(default="doc-chatbot", validation_alias="PINECONE_INDEX")
-    pinecone_cloud: str = "aws"
-    pinecone_region: str = "us-east-1"
+    pinecone_cloud: str = Field(default="aws", validation_alias="PINECONE_CLOUD")
+    pinecone_region: str = Field(default="us-east-1", validation_alias="PINECONE_REGION")
     tavily_api_key: str = Field(default="", validation_alias="TAVILY_API_KEY")
 
     # ── Auth ─────────────────────────────────────────────

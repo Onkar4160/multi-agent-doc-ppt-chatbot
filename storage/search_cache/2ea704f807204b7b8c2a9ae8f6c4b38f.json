@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Tribble Launches the Tribble Agent, a Revolutionary Tool Transforming the RFP Process with Generative AI",
+    "url": "https://finance.yahoo.com/news/tribble-launches-tribble-agent-revolutionary-130000097.html",
+    "snippet": "The Tribble Agent seamlessly integrates into existing workflows, acting as a proactive and intelligent digital teammate for sales teams. The agent provides real-time updates and accurate information retrieval, utilizing the latest multimodal LLMs to accurately understand, analyze, and generate comprehensive responses to complex RFPs and InfoSec questionnaires. The agent significantly reduces the time and effort required for critical sales activities. [...] The ability to respond quickly and accurately to RFPs and questionnaires can be a significant differentiator for enterprises and sales teams seeking a competitive advantage. At the same time, enterprises now face the challenge of transitioning from human-led to AI-driven operations, requiring new strategies, tools, and mindsets. The Tribble Agent provides a new toolset for enterprises to redefine their business processes, from RFP automation to facilitating direct agent-to-agent negotiations. [...] to run revenue, The Tribble Agent helps our sales team to execute, automating manual processes while driving efficiency.\"",
+    "published_date": null
+  },
+  {
+    "title": "RFP Automation: Complete 2026 Guide to AI Response Software",
+    "url": "https://www.v7labs.com/blog/rfp-automation",
+    "snippet": "The dirty secret of the sales industry is that despite billions spent on CRM systems and sales enablement platforms, the actual work of answering an RFP questionnaire remains a manual, error-prone process. Teams that use RFP automation handle an average of 162 RFPs annually, compared to significantly lower numbers for teams still relying on spreadsheets and email threads. The gap between promise and reality has finally started closing. AI agents now automate the parts of RFP response that [...] RFP automation focuses specifically on responding to inbound questionnaires: reading the prospect's questions and drafting answers. Proposal management software is broader, covering the entire proposal lifecycle: opportunity tracking, team collaboration, document assembly, and post-submission analytics. Many modern platforms like Loopio and RFPIO combine both capabilities, but the core value proposition is different. If your bottleneck is drafting answers, you need automation. If your [...] 1. Automated Answer Drafting: The RFI Response Generation Agent reads the prospect's questionnaire, searches your Knowledge Hub, and drafts complete answers with source citations. This is semantic understanding that recognizes when different questions ask about the same capability.",
+    "published_date": null
+  },
+  {
+    "title": "How RFP AI Agents Explained: How Autonomous AI Handles RFP Res... | Tribble",
+    "url": "https://tribble.ai/blog/rfp-ai-agents-explained",
+    "snippet": "An RFP AI agent autonomously executes the full RFP response workflow-ingestion, extraction, retrieval, drafting, SME routing, and delivery-rather than assisting humans who drive each step manually.\n The core technical difference from generative AI tools: live multi-source knowledge retrieval instead of static libraries, multi-step workflow execution instead of single-step text generation, and continuous outcome learning instead of a fixed performance ceiling.",
+    "published_date": null
+  },
+  {
+    "title": "Tribble Officially Launches, Redefining the RFP Response Process with Generative AI",
+    "url": "https://finance.yahoo.com/news/tribble-officially-launches-redefining-rfp-160000432.html?fr=sycsrp_catchall",
+    "snippet": "\"When I'm juggling 6-8 RFPs at the same time, speed is critical. We've seen incredible efficiency gains with Tribble, slashing our drafting times by up to 80% in some cases,\" said Greg Jorgenson, Lead Proposal Manager of Sword Health. \"Tribble is a game-changer, providing robust support to our high-volume, fast-paced sales operations, providing a partnership focused on customer support, innovation, and growth.\" [...] Tribble AI\n\n \n\nLOS ANGELES, May 02, 2024 (GLOBE NEWSWIRE) -- Tribble, an AI-native company out to automate the entire Request for Proposal (RFP) process, has officially launched. With generative AI at its core, Tribble is an integral and proactive addition to an enterprise's sales team, creating brand-new efficiencies by analyzing, understanding, and automating responses to RFPs and Infosecs. [...] Tribble's AI-driven approach allows for real-time updates and accurate information retrieval, setting it apart from legacy RFP management tools. Tribble is streamlining what has traditionally been a manual and error-prone task and providing a transparent mechanism for users to see how responses are generated and refined. This visibility and Tribble's commitment to data security and privacy form the bedrock of its trust-building model.",
+    "published_date": null
+  }
+]

@@ -160,7 +160,16 @@ def main() -> None:
         print("Error: Missing sample templates.")
         sys.exit(1)
 
-    sources_map = {s["id"]: s for s in SAMPLE_SOURCES}
+    is_live = "--live" in sys.argv
+    if is_live:
+        print("   [LIVE MODE] Running live web research & KB retrieval via context_builder...")
+        from app.services.context_builder import build_context
+        ctx = build_context(DEMO_BRIEF, use_web=True, use_kb=True)
+        sources_list = ctx.sources_list if ctx.sources_list else SAMPLE_SOURCES
+        sources_map = ctx.sources_map if ctx.sources_map else {s["id"]: s for s in SAMPLE_SOURCES}
+    else:
+        sources_list = SAMPLE_SOURCES
+        sources_map = {s["id"]: s for s in SAMPLE_SOURCES}
     llm = get_llm_client()
 
     # 1. Analyze Templates
@@ -170,7 +179,7 @@ def main() -> None:
 
     # 2. Generate & Render Proposal DOCX
     print("\n2. Generating Proposal DOCX Model...")
-    doc_model = generate_document_model(DEMO_BRIEF, doc_profile, sources=SAMPLE_SOURCES, llm_client=llm)
+    doc_model = generate_document_model(DEMO_BRIEF, doc_profile, sources=sources_list, llm_client=llm)
     print(f"   Generated DocumentModel: '{doc_model.title}' ({len(doc_model.sections)} sections)")
 
     out_docx = output_dir / "Proposal_Demo.docx"
@@ -179,7 +188,7 @@ def main() -> None:
 
     # 3. Generate & Render Presentation PPTX (12 Slides)
     print("\n3. Generating 12-Slide PPTX Deck Model...")
-    deck_model = generate_deck_model(DEMO_BRIEF, ppt_profile, sources=SAMPLE_SOURCES, slide_count=12, llm_client=llm)
+    deck_model = generate_deck_model(DEMO_BRIEF, ppt_profile, sources=sources_list, slide_count=12, llm_client=llm)
     print(f"   Generated DeckModel: '{deck_model.title}' ({len(deck_model.slides)} slides)")
 
     out_pptx = output_dir / "Deck_Demo.pptx"

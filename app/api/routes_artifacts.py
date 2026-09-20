@@ -22,6 +22,7 @@ from app.agents.ppt_generator import generate_deck_model
 from app.models.file import UploadedFile
 from app.models.template_profile import TemplateProfileRecord
 from app.models.trace import AgentTrace
+from app.services.context_builder import build_context
 from app.services.docx_renderer import render_docx
 from app.services.pptx_renderer import render_pptx
 from app.services.versioning import (
@@ -46,6 +47,8 @@ class GenerateArtifactRequest(BaseModel):
     ppt_template_file_id: int | None = None
     slide_count: int = 12
     sources: list[dict[str, Any]] = Field(default_factory=list)
+    use_web: bool = True
+    use_kb: bool = True
 
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
@@ -56,7 +59,14 @@ async def generate_artifact(
 ):
     """Generate structured DOCX document and/or PPTX presentation from a brief."""
     results: list[dict[str, Any]] = []
-    sources_map = {s.get("id", idx + 1): s for idx, s in enumerate(body.sources)}
+    sources_list = list(body.sources)
+    sources_map = {s.get("id", idx + 1): s for idx, s in enumerate(sources_list)}
+
+    if (body.use_web or body.use_kb) and not sources_list:
+        ctx = build_context(body.brief, use_web=body.use_web, use_kb=body.use_kb)
+        if ctx.sources_list:
+            sources_list = ctx.sources_list
+            sources_map = ctx.sources_map
 
     # Handle DOCX generation
     if body.kind in ("docx", "both"):
@@ -65,7 +75,7 @@ async def generate_artifact(
         )
 
         start_t = time.perf_counter()
-        doc_model = generate_document_model(body.brief, doc_profile, sources=body.sources)
+        doc_model = generate_document_model(body.brief, doc_profile, sources=sources_list)
         temp_out = Path("storage/outputs") / f"temp_{uuid.uuid4()}.docx"
         render_docx(doc_model, doc_path, doc_profile, temp_out, sources_map=sources_map)
         duration_ms = int((time.perf_counter() - start_t) * 1000)
@@ -113,7 +123,7 @@ async def generate_artifact(
         )
 
         start_t = time.perf_counter()
-        deck_model = generate_deck_model(body.brief, ppt_profile, sources=body.sources, slide_count=body.slide_count)
+        deck_model = generate_deck_model(body.brief, ppt_profile, sources=sources_list, slide_count=body.slide_count)
         temp_out = Path("storage/outputs") / f"temp_{uuid.uuid4()}.pptx"
         render_pptx(deck_model, ppt_path, ppt_profile, temp_out, sources_map=sources_map)
         duration_ms = int((time.perf_counter() - start_t) * 1000)
