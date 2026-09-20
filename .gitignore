@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Storage (runtime data)
+storage/app.db
+storage/uploads/*
+storage/artifacts/*
+storage/llm_cache/*
+!storage/uploads/.gitkeep
+!storage/artifacts/.gitkeep
+!storage/llm_cache/.gitkeep
+
+# Output files
+data/outputs/*
+!data/outputs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,39 @@
+# ─── Core ────────────────────────────────────────────────
+fastapi[standard]>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+sqlalchemy>=2.0,<3
+aiosqlite>=0.21
+python-jose[cryptography]>=3.3,<4
+passlib[bcrypt]>=1.7,<2
+python-multipart>=0.0.18
+
+# ─── LLM & Agents ───────────────────────────────────────
+google-genai>=1.14,<2
+langgraph>=0.4,<1
+langchain-core>=0.3,<1
+
+# ─── Embeddings & Vector DB ─────────────────────────────
+sentence-transformers>=3.4,<4
+pinecone>=6.0,<7
+
+# ─── Web Search ──────────────────────────────────────────
+tavily-python>=0.5,<1
+duckduckgo-search>=7.5,<8
+
+# ─── File Processing ────────────────────────────────────
+python-docx>=1.1,<2
+python-pptx>=1.0,<2
+PyMuPDF>=1.25,<2
+pdfplumber>=0.11,<1
+Pillow>=11.0,<12
+
+# ─── UI ──────────────────────────────────────────────────
+streamlit>=1.42,<2
+httpx>=0.28,<1
+
+# ─── Testing & Utilities ─────────────────────────────────
+aiofiles>=24.1,<25
+pytest>=8.0,<10
+
