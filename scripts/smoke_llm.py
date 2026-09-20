@@ -13,7 +13,7 @@ import logging
 from pydantic import BaseModel
 
 from app.core.config import get_settings
-from app.llm.client import get_llm_client
+from app.llm.client import get_llm_client, reset_llm_client
 
 logging.basicConfig(level=logging.INFO)
 

@@ -8,7 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 import pptx
-from pptx.enum.shapes import PP_PLACEHOLDER
 
 from app.llm.client import get_llm_client, LLMClient
 from app.models.template_profile import (
@@ -51,7 +50,7 @@ def analyze_presentation(
 ) -> TemplateProfile:
     """Analyze a PPTX file and produce a TemplateProfile.
 
-    Uses python-pptx to inspect slide layouts, placeholders, theme fonts, and shapes without LLMs.
+    Inspects slide layouts, placeholders, theme fonts, and decoration scores.
     Makes at most ONE LLM call to derive ToneProfile and content_summary.
     """
     path = Path(file_path)
@@ -66,9 +65,16 @@ def analyze_presentation(
     slide_width = round(prs.slide_width.inches, 2)
     slide_height = round(prs.slide_height.inches, 2)
 
-    # 1. Parse Layouts & Placeholders
+    # 1. Parse Layouts, Placeholders, and Decoration Scores
     layouts: list[SlideLayoutInfo] = []
-    layout_roles: dict[str, int] = {}
+    role_matching_map: dict[str, list[tuple[int, int]]] = {
+        "title": [],
+        "section_header": [],
+        "title_content": [],
+        "two_content": [],
+        "title_only": [],
+        "blank": [],
+    }
 
     for idx, layout in enumerate(prs.slide_layouts):
         placeholders: list[PlaceholderInfo] = []
@@ -89,24 +95,42 @@ def analyze_presentation(
                 height=height,
             ))
 
+        # Count non-placeholder shapes on layout & slide master
+        layout_non_ph = [s for s in layout.shapes if not s.is_placeholder]
+        master_non_ph = [s for s in layout.slide_master.shapes if not s.is_placeholder]
+        dec_score = len(layout_non_ph) * 10 + len(master_non_ph) * 2
+
         role = _detect_layout_role(layout.name, placeholders)
+        candidates = _detect_candidate_roles(layout.name, placeholders)
+
         layouts.append(SlideLayoutInfo(
             index=idx,
             name=layout.name,
             role=role,
             placeholders=placeholders,
+            decoration_score=dec_score,
+            role_candidates=candidates,
         ))
 
-        if role not in layout_roles:
-            layout_roles[role] = idx
+        for c_role in candidates:
+            if c_role in role_matching_map:
+                role_matching_map[c_role].append((dec_score, idx))
 
-    # Ensure fallback role defaults if missing
+    # Pick layout for each role preferring highest decoration_score
+    layout_roles: dict[str, int] = {}
+    for role_name, matches in role_matching_map.items():
+        if matches:
+            # Sort by decoration_score descending, then index ascending
+            matches.sort(key=lambda x: (-x[0], x[1]))
+            layout_roles[role_name] = matches[0][1]
+
+    # Defaults fallback if any role is missing
     if "title" not in layout_roles:
         layout_roles["title"] = 0
     if "title_content" not in layout_roles:
         layout_roles["title_content"] = min(1, len(prs.slide_layouts) - 1)
 
-    # 2. Extract theme fonts & colors from slide master XML if available
+    # 2. Extract theme fonts & colors
     theme_fonts, theme_colors = _extract_theme_info(prs)
 
     # 3. Analyze existing slides
@@ -227,6 +251,29 @@ def _detect_layout_role(name: str, placeholders: list[PlaceholderInfo]) -> Slide
     return "other"
 
 
+def _detect_candidate_roles(name: str, placeholders: list[PlaceholderInfo]) -> list[str]:
+    """Identify all roles this layout can potentially fulfill based on placeholders."""
+    candidates = []
+    ph_types = [ph.type for ph in placeholders]
+    has_title = any("title" in t for t in ph_types)
+    body_count = ph_types.count("body") + ph_types.count("object") + ph_types.count("content")
+
+    if has_title or len(placeholders) > 0:
+        candidates.append("title_only")
+    if has_title and body_count >= 1:
+        candidates.append("title_content")
+    if has_title and body_count >= 2:
+        candidates.append("two_content")
+    if "title" in name.lower() and len(placeholders) <= 3:
+        candidates.append("title")
+    if "section" in name.lower() or "header" in name.lower() or (has_title and body_count <= 1):
+        candidates.append("section_header")
+    if len(placeholders) == 0:
+        candidates.append("blank")
+
+    return candidates or ["other"]
+
+
 def _extract_theme_info(prs: pptx.Presentation) -> tuple[dict[str, str], dict[str, str]]:
     """Extract theme major/minor fonts and theme color scheme from PPTX XML."""
     theme_fonts = {"major": "Segoe UI", "minor": "Calibri"}
@@ -234,7 +281,6 @@ def _extract_theme_info(prs: pptx.Presentation) -> tuple[dict[str, str], dict[st
 
     try:
         master = prs.slide_masters[0]
-        # Inspect element XML for font or theme names
         xml_str = master.element.xml
         if 'latin typeface="' in xml_str:
             parts = xml_str.split('latin typeface="')

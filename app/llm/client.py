@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
+import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
@@ -20,16 +23,68 @@ T = TypeVar("T", bound=BaseModel)
 _CACHE_DIR = Path("storage/llm_cache")
 
 
+@dataclass
+class LLMCallStats:
+    """Tracks LLM call statistics for a session."""
+
+    real_calls: int = 0
+    cache_hits: int = 0
+    mock_calls: int = 0
+
+    def summary(self) -> str:
+        """Return a one-line summary string."""
+        return (
+            f"real_calls={self.real_calls}, "
+            f"cache_hits={self.cache_hits}, "
+            f"mock_calls={self.mock_calls}"
+        )
+
+
+@dataclass
+class LLMCallRecord:
+    """Metadata for a single LLM call, suitable for logging into AgentTrace."""
+
+    model: str
+    cache_hit: bool
+    latency_ms: float
+    mock: bool = False
+
+
 class LLMClient:
     """Wrapper around the google-genai SDK with safety-net features."""
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = genai.Client(api_key=settings.gemini_api_key or "MOCK_KEY")
+        self._mock_mode = settings.mock_llm
         self._primary = settings.gemini_model
         self._fallback = settings.gemini_fallback_model
         self._max_retries = settings.llm_max_retries
+        self._stats = LLMCallStats()
+        self._last_record: LLMCallRecord | None = None
+
+        if self._mock_mode:
+            _warn_mock_mode()
+            self._client = None
+        else:
+            api_key = settings.gemini_api_key
+            if not api_key or api_key.strip() in ("", "EX", "mock-gemini-key", "MOCK_KEY"):
+                raise RuntimeError(
+                    "GEMINI_API_KEY missing or placeholder. "
+                    "Add a valid key to .env, or set MOCK_LLM=true for testing."
+                )
+            self._client = genai.Client(api_key=api_key)
+
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def stats(self) -> LLMCallStats:
+        """Return call statistics for this client session."""
+        return self._stats
+
+    @property
+    def last_record(self) -> LLMCallRecord | None:
+        """Return the last LLM call record (for AgentTrace logging)."""
+        return self._last_record
 
     # ── Public methods ───────────────────────────────────
 
@@ -46,8 +101,15 @@ class LLMClient:
         if use_cache:
             cached = self._read_cache(cache_key)
             if cached is not None:
-                logger.debug("LLM cache hit for text query %s", cache_key[:12])
+                logger.info("LLM cache hit for text query %s", cache_key[:12])
+                self._stats.cache_hits += 1
+                self._last_record = LLMCallRecord(
+                    model=self._primary, cache_hit=True, latency_ms=0.0,
+                )
                 return cached
+
+        if self._mock_mode:
+            return self._mock_text_response(prompt)
 
         raw = self._call_with_retry(
             prompt,
@@ -73,8 +135,18 @@ class LLMClient:
         if use_cache:
             cached = self._read_cache(cache_key)
             if cached is not None:
-                logger.debug("LLM cache hit for JSON schema %s (%s)", schema.__name__, cache_key[:12])
+                logger.info(
+                    "LLM cache hit for JSON schema %s (%s)",
+                    schema.__name__, cache_key[:12],
+                )
+                self._stats.cache_hits += 1
+                self._last_record = LLMCallRecord(
+                    model=self._primary, cache_hit=True, latency_ms=0.0,
+                )
                 return schema.model_validate_json(cached)
+
+        if self._mock_mode:
+            return self._mock_json_response(schema)
 
         raw = self._call_with_retry(
             prompt,
@@ -99,6 +171,9 @@ class LLMClient:
         temperature: float = 0.2,
     ) -> str:
         """Send an image + prompt to Gemini vision and return response text."""
+        if self._mock_mode:
+            return self._mock_text_response(prompt)
+
         return self._call_with_retry(
             prompt,
             system=system,
@@ -106,6 +181,27 @@ class LLMClient:
             image_bytes=image_bytes,
             image_mime=mime_type,
         )
+
+    # ── Mock helpers ─────────────────────────────────────
+
+    def _mock_text_response(self, prompt: str) -> str:
+        """Return a canned text response in mock mode."""
+        self._stats.mock_calls += 1
+        self._last_record = LLMCallRecord(
+            model="[MOCK]", cache_hit=False, latency_ms=0.0, mock=True,
+        )
+        logger.warning("[MOCK] Returning canned text response (prompt: %.60s…)", prompt)
+        return "[MOCK] Canned response for testing purposes."
+
+    def _mock_json_response(self, schema: type[T]) -> T:
+        """Return a minimal valid instance of schema in mock mode."""
+        self._stats.mock_calls += 1
+        self._last_record = LLMCallRecord(
+            model="[MOCK]", cache_hit=False, latency_ms=0.0, mock=True,
+        )
+        logger.warning("[MOCK] Returning canned JSON response for schema %s", schema.__name__)
+        # Build a minimal instance — fields with defaults will use them
+        return schema.model_validate({})
 
     # ── Internal helpers ─────────────────────────────────
 
@@ -138,15 +234,21 @@ class LLMClient:
                         image_mime=image_mime,
                     )
                     elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    self._stats.real_calls += 1
+                    self._last_record = LLMCallRecord(
+                        model=model_name, cache_hit=False, latency_ms=elapsed_ms,
+                    )
                     logger.info(
-                        "LLM call to model '%s' completed successfully in %.2f ms",
+                        "LLM call to model '%s' completed in %.0f ms",
                         model_name,
                         elapsed_ms,
                     )
                     return res
                 except Exception as exc:
                     err_str = str(exc)
-                    is_retryable = any(code in err_str for code in ("429", "500", "502", "503", "504"))
+                    is_retryable = any(
+                        code in err_str for code in ("429", "500", "502", "503", "504")
+                    )
                     logger.warning(
                         "LLM call failed (model=%s attempt=%d/%d): %s",
                         model_name,
@@ -180,6 +282,8 @@ class LLMClient:
         image_mime: str,
     ) -> str:
         """Make a single Gemini API call."""
+        assert self._client is not None, "Cannot make API call: client is None (mock mode?)"
+
         config_kwargs: dict = {"temperature": temperature}
         if system:
             config_kwargs["system_instruction"] = system
@@ -229,6 +333,18 @@ class LLMClient:
         path.write_text(data, encoding="utf-8")
 
 
+def _warn_mock_mode() -> None:
+    """Emit a loud warning when mock mode is active."""
+    msg = (
+        "\n" + "=" * 70 + "\n"
+        "  WARNING: MOCK_LLM=true — All LLM calls return canned data.\n"
+        "  This mode is intended for pytest ONLY.\n"
+        + "=" * 70 + "\n"
+    )
+    warnings.warn(msg, stacklevel=3)
+    logger.warning(msg)
+
+
 # ── Singleton accessor ───────────────────────────────────
 
 _instance: LLMClient | None = None
@@ -240,3 +356,9 @@ def get_llm_client() -> LLMClient:
     if _instance is None:
         _instance = LLMClient()
     return _instance
+
+
+def reset_llm_client() -> None:
+    """Reset the singleton (used by tests)."""
+    global _instance
+    _instance = None

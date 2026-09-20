@@ -43,6 +43,8 @@ class SlideLayoutInfo(BaseModel):
     name: str
     role: SlideRole = "other"
     placeholders: list[PlaceholderInfo] = Field(default_factory=list)
+    decoration_score: int = 0
+    role_candidates: list[str] = Field(default_factory=list)
 
 
 class ToneProfile(BaseModel):
