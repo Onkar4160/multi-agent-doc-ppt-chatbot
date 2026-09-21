@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # ── LLM ──────────────────────────────────────────────
     gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
-    gemini_fallback_model: str = Field(default="gemini-2.0-flash", validation_alias="GEMINI_FALLBACK_MODEL")
+    gemini_fallback_model: str = Field(default="gemini-1.5-flash", validation_alias="GEMINI_FALLBACK_MODEL")
     llm_max_retries: int = 3
     mock_llm: bool = Field(default=False, validation_alias="MOCK_LLM")
 

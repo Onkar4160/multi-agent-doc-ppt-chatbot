@@ -1,40 +1,25 @@
-"""Shared agent state definition for the LangGraph supervisor graph."""
+"""GraphState definition for the LangGraph multi-agent pipeline."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypedDict
-
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from typing import Any, TypedDict
 
 
-class AgentState(TypedDict):
-    """State shared across all agent nodes in the supervisor graph."""
+class GraphState(TypedDict, total=False):
+    """Shared state container passed between LangGraph nodes."""
 
-    # ── Conversation ─────────────────────────────────────
-    messages: Annotated[list[BaseMessage], add_messages]
-
-    # ── User request context ─────────────────────────────
-    user_request: str
-    project_id: int
-    output_type: str  # "docx" | "pptx"
-
-    # ── Template ─────────────────────────────────────────
-    template_profile: dict[str, Any] | None
-    template_path: str | None
-
-    # ── Agent results ────────────────────────────────────
-    research_results: list[dict[str, Any]]
-    kb_results: list[dict[str, Any]]
-    document_model: dict[str, Any] | None
-    edit_instructions: list[dict[str, Any]] | None
-    sources: list[dict[str, Any]]
-
-    # ── Versioning ───────────────────────────────────────
-    artifact_version_id: int | None
-
-    # ── Routing ──────────────────────────────────────────
-    next_step: str
-
-    # ── Tracing ──────────────────────────────────────────
-    trace_id: str
+    run_id: str
+    session_id: str | None
+    user_message: str
+    file_ids: list[int]
+    plan: dict[str, Any] | None
+    template_profiles: dict[str, Any]
+    registry: dict[str, Any] | None
+    findings: list[dict[str, Any]]
+    doc_model: dict[str, Any] | None
+    deck_model: dict[str, Any] | None
+    artifacts: list[dict[str, Any]]
+    validation: dict[str, Any] | None
+    retry_count: int
+    reply: str
+    errors: list[str]

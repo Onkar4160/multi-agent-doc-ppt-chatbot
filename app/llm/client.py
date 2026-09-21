@@ -31,6 +31,14 @@ class LLMCallStats:
     cache_hits: int = 0
     mock_calls: int = 0
 
+    @property
+    def total_calls(self) -> int:
+        return self.real_calls + self.mock_calls
+
+    @property
+    def call_count(self) -> int:
+        return self.total_calls
+
     def summary(self) -> str:
         """Return a one-line summary string."""
         return (
@@ -200,8 +208,64 @@ class LLMClient:
             model="[MOCK]", cache_hit=False, latency_ms=0.0, mock=True,
         )
         logger.warning("[MOCK] Returning canned JSON response for schema %s", schema.__name__)
-        # Build a minimal instance — fields with defaults will use them
-        return schema.model_validate({})
+        try:
+            return schema.model_validate({})
+        except Exception:
+            s_name = schema.__name__
+            if s_name == "DocumentModel":
+                return schema.model_validate({
+                    "title": "[MOCK] Sample Proposal Document",
+                    "subtitle": "Sample Engagement Architecture",
+                    "client_name": "Sample Enterprise Client",
+                    "date": "September 2026",
+                    "sections": [
+                        {"heading": "1. Executive Summary", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample mock paragraph content with citation source.", "source_ids": [1]}]},
+                        {"heading": "2. Problem Statement", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample problem statement.", "source_ids": [1]}]},
+                        {"heading": "3. Proposed Solution", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample solution description.", "source_ids": [1]}]},
+                        {"heading": "4. Methodology", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample methodology.", "source_ids": [1]}]},
+                        {"heading": "5. Commercials & Timeline", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample commercials.", "source_ids": [1]}]},
+                        {"heading": "6. Sources & References", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample references.", "source_ids": [1]}]},
+                    ],
+                })
+            elif s_name == "DeckModel":
+                return schema.model_validate({
+                    "title": "[MOCK] Sample Presentation Deck",
+                    "slides": [
+                        {"role": "title", "title": "Mock Title Slide", "subtitle": "Mock Subtitle", "source_ids": [1]},
+                        {"role": "section_header", "title": "Mock Section Header", "subtitle": "Mock Subtitle", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 1", "bullets": [{"text": "Mock bullet text item 1.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 2.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 3.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 1.", "source_ids": [1]},
+                        {"role": "two_content", "title": "Mock Comparison Slide", "left": [{"text": "Left bullet item 1.", "level": 0, "source_ids": [1]}, {"text": "Left bullet item 2.", "level": 0, "source_ids": [1]}, {"text": "Left bullet item 3.", "level": 0, "source_ids": [1]}], "right": [{"text": "Right bullet item 1.", "level": 0, "source_ids": [1]}, {"text": "Right bullet item 2.", "level": 0, "source_ids": [1]}, {"text": "Right bullet item 3.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 2.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 2", "bullets": [{"text": "Mock bullet text item 4.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 5.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 6.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 3.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 3", "bullets": [{"text": "Mock bullet text item 7.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 8.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 9.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 4.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 4", "bullets": [{"text": "Mock bullet text item 10.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 11.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 12.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 5.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 5", "bullets": [{"text": "Mock bullet text item 13.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 14.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 15.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 6.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 6", "bullets": [{"text": "Mock bullet text item 16.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 17.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 18.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 7.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 7", "bullets": [{"text": "Mock bullet text item 19.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 20.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 21.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 8.", "source_ids": [1]},
+                        {"role": "title_content", "title": "Mock Content Slide 8", "bullets": [{"text": "Mock bullet text item 22.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 23.", "level": 0, "source_ids": [1]}, {"text": "Mock bullet text item 24.", "level": 0, "source_ids": [1]}], "notes": "Mock notes 9.", "source_ids": [1]},
+                        {"role": "title_only", "title": "Mock Conclusion Slide", "subtitle": "Mock Subtitle", "source_ids": [1]},
+                    ],
+                })
+            elif s_name == "SearchQueriesSchema":
+                return schema.model_validate({"queries": ["Generative AI trends 2026", "Enterprise RAG adoption 2026"]})
+            elif s_name == "ResearchFindingsSchema":
+                return schema.model_validate({
+                    "findings": [
+                        {"text": "72% of mid-size enterprises plan agentic workflow adoption.", "source_ids": [1]},
+                        {"text": "Automated document creation reduces proposal SLA by 80%.", "source_ids": [1]},
+                    ]
+                })
+            elif s_name == "Plan":
+                return schema.model_validate({
+                    "action": "generate",
+                    "outputs": ["docx", "pptx"],
+                    "topic": "Sample Topic",
+                    "slide_count": 12,
+                })
+            dummy_data = {}
+            for fname, ffield in schema.model_fields.items():
+                if ffield.is_required():
+                    dummy_data[fname] = f"Mock {fname}"
+            return schema.model_validate(dummy_data)
 
     # ── Internal helpers ─────────────────────────────────
 

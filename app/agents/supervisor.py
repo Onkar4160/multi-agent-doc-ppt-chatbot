@@ -1,65 +1,127 @@
-"""Supervisor agent – routes to specialized workers based on the current state."""
+"""Supervisor Agent – parses user messages into structured execution Plans."""
 
 from __future__ import annotations
 
 import logging
-import time
+import re
+from typing import Any, Literal
 
-from langchain_core.messages import AIMessage
+from pydantic import BaseModel, Field
 
-from app.agents.state import AgentState
-from app.llm.client import get_llm_client
-from app.llm.schemas import SupervisorDecision
+from app.llm.client import get_llm_client, LLMClient
 
 logger = logging.getLogger(__name__)
 
 
-def supervisor_node(state: AgentState) -> dict:
-    """Decide which agent should act next based on current state."""
-    start = time.time()
+class Plan(BaseModel):
+    """Structured execution plan parsed from user prompt."""
 
-    llm = get_llm_client()
+    action: Literal["generate", "edit", "convert", "answer"] = Field(
+        default="generate", description="Primary action requested by the user."
+    )
+    outputs: list[Literal["docx", "pptx"]] = Field(
+        default_factory=lambda: ["docx", "pptx"],
+        description="Target output formats to create ('docx', 'pptx', or both).",
+    )
+    topic: str = Field(
+        default="", description="Cleaned topic or user prompt context."
+    )
+    slide_count: int = Field(
+        default=12, description="Target slide count for presentation deck."
+    )
+    use_web: bool = Field(
+        default=True, description="Whether to include web research."
+    )
+    use_kb: bool = Field(
+        default=True, description="Whether to include enterprise KB RAG retrieval."
+    )
+    doc_template_file_id: int | None = Field(
+        default=None, description="Uploaded DOCX template file ID if available."
+    )
+    ppt_template_file_id: int | None = Field(
+        default=None, description="Uploaded PPTX template file ID if available."
+    )
 
-    # Build context summary for the supervisor
-    context_parts = [
-        f"User request: {state.get('user_request', '')}",
-        f"Output type: {state.get('output_type', 'docx')}",
-        f"Has template: {state.get('template_profile') is not None}",
-        f"Research results: {len(state.get('research_results', []))} facts",
-        f"KB results: {len(state.get('kb_results', []))} chunks",
-        f"Has document model: {state.get('document_model') is not None}",
-        f"Has edit instructions: {state.get('edit_instructions') is not None}",
-    ]
-    context = "\n".join(context_parts)
 
-    prompt = f"""You are a supervisor agent orchestrating a document generation pipeline.
-Based on the current state, decide which agent should act next.
+SUPERVISOR_PROMPT = """You are an intent parser and supervisor planner for an enterprise document & presentation generator chatbot.
+Analyze the user's message and output a structured JSON plan matching the Plan schema.
 
-Current state:
-{context}
+USER MESSAGE:
+"{user_message}"
 
-Available agents:
-- researcher: Search the web for facts and data relevant to the user's request. Use when more information is needed.
-- kb_retriever: Search the enterprise knowledge base for relevant internal documents. Use when internal context is needed.
-- generator: Generate the document/presentation content as structured JSON. Use when research and KB data are ready.
-- editor: Edit an existing document model based on edit instructions. Use when the user wants to modify a previously generated document.
-- FINISH: The task is complete. Use when the document model has been generated or edited.
+RULES:
+1. `action`: Determine if the user wants to "generate" new files, "edit" existing files, "convert" formats, or simply "answer" a question.
+2. `outputs`: Select ["docx"], ["pptx"], or ["docx", "pptx"] depending on what the user requested. If both proposal and slides/presentation are requested, output both.
+3. `topic`: Extract the core subject/brief to research and write about.
+4. `slide_count`: Number of slides requested (default 12).
+5. `use_web`: Set true if web research is useful for current facts.
+6. `use_kb`: Set true if company KB/context is relevant.
+"""
 
-Rules:
-1. If no research has been done yet, route to researcher first.
-2. If KB retrieval hasn't been done, route to kb_retriever after researcher.
-3. If research and KB data are ready but no document model exists, route to generator.
-4. If edit instructions exist and a document model exists, route to editor.
-5. If the document model exists and no edits are needed, route to FINISH.
 
-Return the next_step and your reasoning."""
+def parse_plan(
+    user_message: str,
+    file_ids: list[int] | None = None,
+    llm_client: LLMClient | None = None,
+) -> Plan:
+    """Parse user message into a Plan using regex + ONE LLM call.
 
-    decision = llm.generate_json(prompt, SupervisorDecision, use_cache=False, temperature=0.1)
+    Args:
+        user_message: User chat message text.
+        file_ids: Optional list of uploaded file IDs.
+        llm_client: Optional LLMClient instance.
 
-    duration_ms = int((time.time() - start) * 1000)
-    logger.info("Supervisor → %s (reason: %s, %dms)", decision.next_step, decision.reasoning, duration_ms)
+    Returns:
+        Structured Plan object.
+    """
+    file_ids = file_ids or []
+    if llm_client is None:
+        llm_client = get_llm_client()
 
-    return {
-        "next_step": decision.next_step,
-        "messages": [AIMessage(content=f"Supervisor routing to: {decision.next_step}. {decision.reasoning}")],
-    }
+    # 1. Regex check for slide count
+    extracted_slides = None
+    slide_match = re.search(r"(\d+)\s*[-_\s]*slides?", user_message, re.IGNORECASE)
+    if slide_match:
+        extracted_slides = int(slide_match.group(1))
+
+    # 2. LLM Call to parse plan schema
+    try:
+        plan = llm_client.generate_json(
+            prompt=SUPERVISOR_PROMPT.format(user_message=user_message),
+            schema=Plan,
+            system="You are a precise intent classification agent.",
+        )
+    except Exception as exc:
+        logger.warning(f"Supervisor LLM call failed: {exc}. Falling back to default plan.")
+        # Infer outputs from message keywords
+        msg_lower = user_message.lower()
+        outputs: list[Literal["docx", "pptx"]] = []
+        if "doc" in msg_lower or "proposal" in msg_lower:
+            outputs.append("docx")
+        if "ppt" in msg_lower or "slide" in msg_lower or "presentation" in msg_lower:
+            outputs.append("pptx")
+        if not outputs:
+            outputs = ["docx", "pptx"]
+
+        action: Literal["generate", "edit", "convert", "answer"] = "generate"
+        if "edit" in msg_lower or "modify" in msg_lower:
+            action = "edit"
+        elif "convert" in msg_lower:
+            action = "convert"
+        elif "?" in user_message and "create" not in msg_lower and "make" not in msg_lower:
+            action = "answer"
+
+        plan = Plan(
+            action=action,
+            outputs=outputs,
+            topic=user_message,
+            slide_count=extracted_slides or 12,
+        )
+
+    # 3. Override slide count if regex explicitly matched
+    if extracted_slides is not None:
+        plan.slide_count = extracted_slides
+
+    # 4. Template rule: map file_ids to doc/ppt template file IDs
+    # (caller or template analyzer node will resolve file_ids if specific types are uploaded)
+    return plan
