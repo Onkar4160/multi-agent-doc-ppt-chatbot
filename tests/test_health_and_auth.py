@@ -61,7 +61,7 @@ def test_file_upload_and_list_success(client: TestClient):
     headers = {"Authorization": f"Bearer {token}"}
 
     # 2. Upload a valid docx file
-    file_bytes = b"Hello docx test content"
+    file_bytes = b"PK\x03\x04Hello docx test content"
     upload_res = client.post(
         "/files/upload",
         headers=headers,
@@ -97,3 +97,62 @@ def test_file_upload_invalid_extension(client: TestClient):
     )
     assert upload_res.status_code == 400
     assert "Unsupported file type" in upload_res.json()["detail"]
+
+
+def test_file_upload_corrupt_zip(client: TestClient):
+    """Verify .docx and .pptx without zip magic bytes return 400 'Corrupt file'."""
+    login_res = client.post(
+        "/auth/login",
+        json={"username": "demo", "password": "demo123"},
+    )
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Corrupt docx
+    res_docx = client.post(
+        "/files/upload",
+        headers=headers,
+        files={"file": ("bad.docx", b"Not a zip at all", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert res_docx.status_code == 400
+    assert res_docx.json()["detail"] == "Corrupt file"
+
+    # Corrupt pptx
+    res_pptx = client.post(
+        "/files/upload",
+        headers=headers,
+        files={"file": ("bad.pptx", b"Corrupted pptx payload", "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+    )
+    assert res_pptx.status_code == 400
+    assert res_pptx.json()["detail"] == "Corrupt file"
+
+
+def test_file_upload_duplicate_returns_existing(client: TestClient):
+    """Verify uploading file with same name and same size/hash returns existing record."""
+    login_res = client.post(
+        "/auth/login",
+        json={"username": "demo", "password": "demo123"},
+    )
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    content = b"PK\x03\x04Unique template content for duplicate testing"
+    res1 = client.post(
+        "/files/upload",
+        headers=headers,
+        files={"file": ("duplicate_template.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert res1.status_code == 201
+    file1 = res1.json()
+
+    # Upload same file again
+    res2 = client.post(
+        "/files/upload",
+        headers=headers,
+        files={"file": ("duplicate_template.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert res2.status_code in (200, 201)
+    file2 = res2.json()
+
+    assert file2["id"] == file1["id"]
+    assert file2["filename"] == file1["filename"]

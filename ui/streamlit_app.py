@@ -221,25 +221,47 @@ with st.sidebar:
     files_data = _get("/files") or []
     st.session_state.uploaded_files = files_data
 
-    if files_data:
-        st.caption("Select files to include as context:")
-        for f in files_data:
-            ft = f.get("file_type", "")
-            badge = _type_badge(ft)
-            fid = f["id"]
-            checked = fid in st.session_state.selected_file_ids
-            col_chk, col_lbl = st.columns([0.12, 0.88])
-            with col_chk:
-                new_val = st.checkbox("", value=checked, key=f"fchk_{fid}", label_visibility="collapsed")
-            with col_lbl:
-                st.markdown(
-                    f'{badge} {f["filename"]}',
-                    unsafe_allow_html=True,
-                )
-            if new_val and fid not in st.session_state.selected_file_ids:
-                st.session_state.selected_file_ids.append(fid)
-            elif not new_val and fid in st.session_state.selected_file_ids:
-                st.session_state.selected_file_ids.remove(fid)
+    # Hide files that fail analysis
+    analyzed_files = [f for f in files_data if f.get("analyzed") is True]
+
+    # Show each name once (newest first)
+    seen_names: set[str] = set()
+    unique_files: list[dict] = []
+    for f in analyzed_files:
+        fn = f.get("filename", "")
+        if fn and fn not in seen_names:
+            seen_names.add(fn)
+            unique_files.append(f)
+
+    docx_files = [f for f in unique_files if f.get("file_type") == "docx"]
+    pptx_files = [f for f in unique_files if f.get("file_type") == "pptx"]
+
+    selected_ids: list[int] = []
+
+    # Two radio selectors: "DOCX template" and "PPTX template" (newest is default)
+    if docx_files:
+        docx_options = [f["filename"] for f in docx_files] + ["(None)"]
+        selected_docx = st.radio("DOCX template", docx_options, index=0)
+        if selected_docx and selected_docx != "(None)":
+            for f in docx_files:
+                if f["filename"] == selected_docx:
+                    selected_ids.append(f["id"])
+                    break
+    else:
+        st.caption("No analyzed DOCX templates")
+
+    if pptx_files:
+        pptx_options = [f["filename"] for f in pptx_files] + ["(None)"]
+        selected_pptx = st.radio("PPTX template", pptx_options, index=0)
+        if selected_pptx and selected_pptx != "(None)":
+            for f in pptx_files:
+                if f["filename"] == selected_pptx:
+                    selected_ids.append(f["id"])
+                    break
+    else:
+        st.caption("No analyzed PPTX templates")
+
+    st.session_state.selected_file_ids = selected_ids
 
     st.divider()
 
@@ -388,19 +410,28 @@ def _send_message(message: str) -> None:
 def _render_assistant_message(entry: dict) -> None:
     """Render an assistant chat bubble with citations, validation, errors."""
     is_failed = entry.get("failed", False)
+    errors = entry.get("errors", [])
+    has_errors = is_failed or bool(errors)
 
-    if is_failed:
+    if has_errors:
+        artifacts = entry.get("artifacts", [])
+        status_label = "PARTIAL" if artifacts else "FAILED"
         st.markdown(
-            f'<div class="error-box">⚠️ <b>FAILED / PARTIAL</b></div>',
+            f'<div class="error-box">⚠️ <b>{status_label}</b></div>',
             unsafe_allow_html=True,
         )
-        for err in entry.get("errors", []):
+        for err in errors:
             st.markdown(
                 f'<div class="error-box">• {err}</div>', unsafe_allow_html=True
             )
 
     content = entry.get("content", "")
     if content:
+        if has_errors:
+            artifacts = entry.get("artifacts", [])
+            header = "### Generation PARTIAL\n" if artifacts else "### Generation FAILED\n"
+            content = content.replace("### Generation Completed Successfully\n", header)
+            content = content.replace("### Generation Completed Successfully", header.strip())
         st.markdown(content)
 
     # Citations expander
@@ -493,12 +524,13 @@ with art_col:
             for art in artifacts_list:
                 art_id = art["id"]
                 title = art.get("title", f"Artifact {art_id}")
+                if title.startswith("[MOCK]"):
+                    continue
                 kind = art.get("artifact_type", "?")
                 latest_v = art.get("latest_version", 1)
 
-                with st.expander(
-                    f"{_type_badge(kind)} **{title}** (v{latest_v})" , expanded=False
-                ):
+                label = f"{kind.upper()} | {title} (v{latest_v})"
+                with st.expander(label, expanded=False):
                     # Download buttons for latest version
                     dl_url = f"{API_BASE}/artifacts/{art_id}/download?version={latest_v}"
                     dcol1, dcol2 = st.columns(2)

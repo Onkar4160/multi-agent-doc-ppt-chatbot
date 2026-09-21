@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import get_settings
 from app.agents.doc_analyzer import analyze_document
 from app.agents.doc_generator import generate_document_model
 from app.agents.ppt_analyzer import analyze_presentation
@@ -76,7 +77,9 @@ async def generate_artifact(
 
         start_t = time.perf_counter()
         doc_model = generate_document_model(body.brief, doc_profile, sources=sources_list)
-        temp_out = Path("storage/outputs") / f"temp_{uuid.uuid4()}.docx"
+        out_dir = Path(get_settings().storage_dir) / "outputs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        temp_out = out_dir / f"temp_{uuid.uuid4()}.docx"
         render_docx(doc_model, doc_path, doc_profile, temp_out, sources_map=sources_map)
         duration_ms = int((time.perf_counter() - start_t) * 1000)
 
@@ -124,7 +127,9 @@ async def generate_artifact(
 
         start_t = time.perf_counter()
         deck_model = generate_deck_model(body.brief, ppt_profile, sources=sources_list, slide_count=body.slide_count)
-        temp_out = Path("storage/outputs") / f"temp_{uuid.uuid4()}.pptx"
+        out_dir = Path(get_settings().storage_dir) / "outputs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        temp_out = out_dir / f"temp_{uuid.uuid4()}.pptx"
         render_pptx(deck_model, ppt_path, ppt_profile, temp_out, sources_map=sources_map)
         duration_ms = int((time.perf_counter() - start_t) * 1000)
 

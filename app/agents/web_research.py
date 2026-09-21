@@ -21,7 +21,10 @@ from app.services.source_registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
 
-CACHE_DIR = Path("storage/search_cache")
+def _get_cache_dir() -> Path:
+    p = Path(get_settings().storage_dir) / "search_cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 class SearchQueriesSchema(BaseModel):
@@ -53,9 +56,9 @@ def _search_web_single_query(
     query: str, today_str: str, max_results: int = 4
 ) -> list[dict[str, Any]]:
     """Execute search for a single query using Tavily, falling back to DuckDuckGo."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_dir = _get_cache_dir()
     cache_hash = hashlib.md5(f"{query.strip().lower()}_{today_str}".encode("utf-8")).hexdigest()
-    cache_path = CACHE_DIR / f"{cache_hash}.json"
+    cache_path = cache_dir / f"{cache_hash}.json"
 
     if cache_path.exists():
         try:

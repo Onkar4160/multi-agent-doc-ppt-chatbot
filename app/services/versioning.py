@@ -11,6 +11,7 @@ from typing import Sequence
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.artifact import Artifact, ArtifactVersion
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ async def add_version(
     new_version_no = current_max + 1
 
     ext = src_path.suffix.lower()
-    dest_dir = Path("storage/artifacts") / str(artifact_id)
+    dest_dir = Path(get_settings().storage_dir) / "artifacts" / str(artifact_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / f"v{new_version_no}{ext}"
 

@@ -68,3 +68,10 @@ def get_sync_session():
     sync_engine = create_engine(sync_url)
     return sessionmaker(bind=sync_engine)()
 
+
+def reset_db():
+    """Reset cached engine and session factory."""
+    global _engine, _session_factory
+    _engine = None
+    _session_factory = None
+

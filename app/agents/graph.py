@@ -438,7 +438,13 @@ def node_finalize(state: GraphState) -> GraphState:
         db_sess.close()
 
     # 3. Format user reply with download links & citations summary
-    reply_parts = ["### Generation Completed Successfully\n"]
+    errors = state.get("errors", [])
+    if errors and not artifacts_created:
+        reply_parts = ["### Generation FAILED\n"]
+    elif errors:
+        reply_parts = ["### Generation PARTIAL\n"]
+    else:
+        reply_parts = ["### Generation Completed Successfully\n"]
     if artifacts_created:
         reply_parts.append("**Generated Artifacts:**")
         for a in artifacts_created:

@@ -6,8 +6,15 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
 
+from app.core.config import get_settings
+
 ALLOWED_EXTENSIONS = {".docx", ".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"}
-UPLOAD_DIR = Path("storage/uploads")
+
+
+def get_upload_dir() -> Path:
+    p = Path(get_settings().storage_dir) / "uploads"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def safe_filename(name: str) -> str:
@@ -32,7 +39,7 @@ def validate_upload(file: UploadFile, max_mb: int = 25) -> str:
 
 async def save_upload(file: UploadFile, dest_dir: Path | None = None) -> Path:
     """Save an uploaded file to disk and return the path."""
-    dest = dest_dir or UPLOAD_DIR
+    dest = dest_dir or get_upload_dir()
     dest.mkdir(parents=True, exist_ok=True)
     name = safe_filename(file.filename or "unknown")
     path = dest / name

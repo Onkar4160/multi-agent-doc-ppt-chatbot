@@ -21,7 +21,10 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
-_CACHE_DIR = Path("storage/llm_cache")
+def _get_cache_dir() -> Path:
+    p = Path(get_settings().storage_dir) / "llm_cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 @dataclass
@@ -407,7 +410,7 @@ class LLMClient:
     @staticmethod
     def _read_cache(key: str) -> str | None:
         """Read cached response from disk."""
-        path = _CACHE_DIR / f"{key}.json"
+        path = _get_cache_dir() / f"{key}.json"
         if path.exists():
             return path.read_text(encoding="utf-8")
         return None
@@ -415,7 +418,7 @@ class LLMClient:
     @staticmethod
     def _write_cache(key: str, data: str) -> None:
         """Write response to disk cache."""
-        path = _CACHE_DIR / f"{key}.json"
+        path = _get_cache_dir() / f"{key}.json"
         path.write_text(data, encoding="utf-8")
 
 

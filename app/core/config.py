@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     demo_username: str = Field(default="demo", validation_alias="DEMO_USERNAME")
     demo_password: str = Field(default="demo123", validation_alias="DEMO_PASSWORD")
 
-    # ── Database ─────────────────────────────────────────
+    # ── Database & Storage ───────────────────────────────
     database_url: str = Field(default="sqlite+aiosqlite:///./storage/app.db", validation_alias="DATABASE_URL")
+    storage_dir: str = Field(default="storage", validation_alias="STORAGE_DIR")
 
     # ── Upload ───────────────────────────────────────────
     max_upload_mb: int = Field(default=25, validation_alias="MAX_UPLOAD_MB")
@@ -63,3 +64,9 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def reset_settings() -> None:
+    """Reset cached singleton settings instance."""
+    global _settings
+    _settings = None

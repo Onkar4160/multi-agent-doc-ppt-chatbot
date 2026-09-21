@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -52,9 +53,51 @@ async def upload_file(
             detail=f"File size ({len(content)} bytes) exceeds maximum limit of {settings.max_upload_mb} MB",
         )
 
+    # Magic bytes check for zip files (.docx and .pptx)
+    if ext in {".docx", ".pptx"}:
+        if len(content) < 4 or not (content.startswith(b"PK\x03\x04") or content.startswith(b"PK\x05\x06")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Corrupt file",
+            )
+
     safe_filename = Path(file.filename).name
+
+    # Check for duplicate upload (same name and same size hash returns existing record)
+    result = await db.execute(
+        select(UploadedFile).where(
+            UploadedFile.filename == safe_filename,
+            UploadedFile.file_size == len(content),
+        ).order_by(UploadedFile.id.desc())
+    )
+    existing_candidates = result.scalars().all()
+    if existing_candidates:
+        content_hash = hashlib.sha256(content).hexdigest()
+        for existing in existing_candidates:
+            existing_path = Path(existing.stored_path)
+            if existing_path.exists():
+                try:
+                    if hashlib.sha256(existing_path.read_bytes()).hexdigest() == content_hash:
+                        return {
+                            "id": existing.id,
+                            "filename": existing.filename,
+                            "file_type": existing.file_type,
+                            "file_size": existing.file_size,
+                            "stored_path": existing.stored_path,
+                        }
+                except Exception:
+                    pass
+            else:
+                return {
+                    "id": existing.id,
+                    "filename": existing.filename,
+                    "file_type": existing.file_type,
+                    "file_size": existing.file_size,
+                    "stored_path": existing.stored_path,
+                }
+
     file_uuid = str(uuid.uuid4())
-    upload_dir = Path("storage/uploads") / file_uuid
+    upload_dir = Path(settings.storage_dir) / "uploads" / file_uuid
     upload_dir.mkdir(parents=True, exist_ok=True)
     saved_path = upload_dir / safe_filename
 
@@ -89,6 +132,9 @@ async def list_files(
     result = await db.execute(select(UploadedFile).order_by(UploadedFile.id.desc()))
     files = result.scalars().all()
 
+    profile_result = await db.execute(select(TemplateProfileRecord.file_id).distinct())
+    analyzed_ids = set(profile_result.scalars().all())
+
     return [
         {
             "id": f.id,
@@ -97,6 +143,7 @@ async def list_files(
             "file_size": f.file_size,
             "stored_path": f.stored_path,
             "created_at": f.created_at.isoformat() if f.created_at else None,
+            "analyzed": f.id in analyzed_ids,
         }
         for f in files
     ]
