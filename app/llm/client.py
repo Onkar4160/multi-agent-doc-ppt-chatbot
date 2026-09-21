@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import sys
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -69,6 +70,11 @@ class LLMClient:
         self._max_retries = settings.llm_max_retries
         self._stats = LLMCallStats()
         self._last_record: LLMCallRecord | None = None
+
+        if self._mock_mode and "pytest" not in sys.modules:
+            sys.exit(
+                "MOCK_LLM is only for tests. Remove it from .env"
+            )
 
         if self._mock_mode:
             _warn_mock_mode()
@@ -260,6 +266,22 @@ class LLMClient:
                     "outputs": ["docx", "pptx"],
                     "topic": "Sample Topic",
                     "slide_count": 12,
+                })
+            elif s_name == "EditPlan":
+                return schema.model_validate({
+                    "target": "docx",
+                    "ops": [
+                        {
+                            "type": "add_section",
+                            "after_heading": "1. Executive Summary",
+                            "section": {
+                                "heading": "New Section",
+                                "level": 1,
+                                "blocks": [{"type": "paragraph", "text": "Mock added section text.", "source_ids": [1]}],
+                            },
+                        }
+                    ],
+                    "summary": "Mock edit plan operation",
                 })
             dummy_data = {}
             for fname, ffield in schema.model_fields.items():

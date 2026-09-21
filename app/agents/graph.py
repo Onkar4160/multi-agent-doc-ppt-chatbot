@@ -15,6 +15,8 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.agents.converter import convert_artifact
+from app.agents.editor import edit_artifact
 from app.agents.doc_analyzer import analyze_document
 from app.agents.doc_generator import generate_document_model
 from app.agents.ppt_analyzer import analyze_presentation
@@ -464,6 +466,146 @@ def node_finalize(state: GraphState) -> GraphState:
 
 # ── Conditional Routing Edge ───────────────────────────────────────────────
 
+
+@traced("edit_node")
+def node_edit(state: GraphState) -> GraphState:
+    """Execute conversational edits on target artifact(s)."""
+    user_msg = state.get("user_message", "")
+    db_sess = _get_sync_session()
+
+    if not db_sess:
+        state["reply"] = "Database unavailable for conversational edit."
+        return state
+
+    try:
+        # Determine target type from prompt keywords
+        msg_lower = user_msg.lower()
+        target_kind = None
+        if any(w in msg_lower for w in ["slide", "presentation", "deck"]):
+            target_kind = "pptx"
+        elif any(w in msg_lower for w in ["document", "report", "proposal"]):
+            target_kind = "docx"
+
+        query = db_sess.query(Artifact)
+        if target_kind:
+            query = query.filter(Artifact.artifact_type == target_kind)
+
+        artifacts = query.order_by(Artifact.id.desc()).all()
+
+        if not artifacts:
+            state["reply"] = "No existing artifacts found to edit. Please generate a document or presentation first."
+            state["artifacts"] = []
+            db_sess.close()
+            return state
+
+        edited_artifacts = []
+        reply_lines = ["### Conversational Edit Completed\n"]
+
+        # If target was specific, edit latest of that type. Otherwise edit latest docx and/or pptx
+        target_arts = []
+        if target_kind:
+            target_arts = [artifacts[0]]
+        else:
+            docx_art = next((a for a in artifacts if a.artifact_type == "docx"), None)
+            pptx_art = next((a for a in artifacts if a.artifact_type == "pptx"), None)
+            if docx_art:
+                target_arts.append(docx_art)
+            if pptx_art:
+                target_arts.append(pptx_art)
+
+        for art in target_arts:
+            res = edit_artifact(artifact_id=art.id, instruction=user_msg, db_session=db_sess)
+            edited_artifacts.append({
+                "kind": art.artifact_type,
+                "artifact_id": art.id,
+                "version": res.new_version_no,
+                "title": art.title,
+                "download_url": res.download_url,
+                "file_path": res.file_path,
+            })
+            reply_lines.append(f"**Updated {art.artifact_type.upper()} Artifact (v{res.new_version_no}):**")
+            reply_lines.append(f"- Summary: {res.summary}")
+            if res.diff.get("added"):
+                reply_lines.append(f"- Added: {', '.join(res.diff['added'])}")
+            if res.diff.get("changed"):
+                reply_lines.append(f"- Changed: {', '.join(res.diff['changed'])}")
+            if res.diff.get("removed"):
+                reply_lines.append(f"- Removed: {', '.join(res.diff['removed'])}")
+            reply_lines.append(f"- [Download Updated File]({res.download_url})\n")
+
+        db_sess.close()
+        state["reply"] = "\n".join(reply_lines)
+        state["artifacts"] = edited_artifacts
+        return state
+    except Exception as exc:
+        if db_sess:
+            db_sess.close()
+        raise exc
+
+
+@traced("convert_node")
+def node_convert(state: GraphState) -> GraphState:
+    """Execute bi-directional conversion between DOCX and PPTX."""
+    user_msg = state.get("user_message", "")
+    db_sess = _get_sync_session()
+
+    if not db_sess:
+        state["reply"] = "Database unavailable for format conversion."
+        return state
+
+    try:
+        msg_lower = user_msg.lower()
+        if "to ppt" in msg_lower or "to slide" in msg_lower or "to presentation" in msg_lower:
+            src_kind = "docx"
+            target_kind = "pptx"
+        elif "to doc" in msg_lower or "to proposal" in msg_lower or "to report" in msg_lower:
+            src_kind = "pptx"
+            target_kind = "docx"
+        else:
+            # Infer from latest artifact
+            latest_art = db_sess.query(Artifact).order_by(Artifact.id.desc()).first()
+            if latest_art and latest_art.artifact_type == "docx":
+                src_kind = "docx"
+                target_kind = "pptx"
+            else:
+                src_kind = "pptx"
+                target_kind = "docx"
+
+        src_art = db_sess.query(Artifact).filter(Artifact.artifact_type == src_kind).order_by(Artifact.id.desc()).first()
+
+        if not src_art:
+            state["reply"] = f"No {src_kind.upper()} artifact found to convert. Please generate a document or presentation first."
+            state["artifacts"] = []
+            db_sess.close()
+            return state
+
+        res = convert_artifact(artifact_id=src_art.id, target_kind=target_kind, db_session=db_sess)
+        db_sess.close()
+
+        artifacts_created = [{
+            "kind": target_kind,
+            "artifact_id": res.new_artifact_id,
+            "version": res.version_no,
+            "title": res.title,
+            "download_url": res.download_url,
+            "file_path": res.file_path,
+        }]
+
+        reply_text = (
+            f"### Format Conversion Completed\n\n"
+            f"Successfully converted **{src_art.title}** ({src_kind.upper()}) to **{res.title}** ({target_kind.upper()}).\n"
+            f"- [Download Converted {target_kind.upper()}]({res.download_url})"
+        )
+
+        state["reply"] = reply_text
+        state["artifacts"] = artifacts_created
+        return state
+    except Exception as exc:
+        if db_sess:
+            db_sess.close()
+        raise exc
+
+
 def route_intent(state: GraphState) -> str:
     """Route plan action to appropriate entry node."""
     plan_data = state.get("plan", {})
@@ -471,8 +613,10 @@ def route_intent(state: GraphState) -> str:
 
     if action == "answer":
         return "answer_node"
-    elif action in ("edit", "convert"):
-        return "stub_node"
+    elif action == "edit":
+        return "edit_node"
+    elif action == "convert":
+        return "convert_node"
     else:
         return "analyze_templates_node"
 
@@ -504,6 +648,8 @@ def build_graph() -> StateGraph:
     # Add Nodes
     builder.add_node("plan_node", node_plan)
     builder.add_node("stub_node", node_stub)
+    builder.add_node("edit_node", node_edit)
+    builder.add_node("convert_node", node_convert)
     builder.add_node("answer_node", node_answer)
     builder.add_node("analyze_templates_node", node_analyze_templates)
     builder.add_node("gather_context_node", node_gather_context)
@@ -522,11 +668,15 @@ def build_graph() -> StateGraph:
         {
             "answer_node": "answer_node",
             "stub_node": "stub_node",
+            "edit_node": "edit_node",
+            "convert_node": "convert_node",
             "analyze_templates_node": "analyze_templates_node",
         },
     )
 
     builder.add_edge("stub_node", END)
+    builder.add_edge("edit_node", END)
+    builder.add_edge("convert_node", END)
     builder.add_edge("answer_node", END)
 
     # Generation flow edges

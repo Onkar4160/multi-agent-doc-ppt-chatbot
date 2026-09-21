@@ -36,3 +36,4 @@ class ArtifactVersion(Base, TimestampMixin):
     )
     change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of Source ids
+    diff_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list/dict of diff changes

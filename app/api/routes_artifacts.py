@@ -192,16 +192,157 @@ async def get_artifact_versions(
 ):
     """List version history for a specific artifact."""
     versions = await list_versions(db, id)
-    return [
-        {
+    output = []
+    for v in versions:
+        diff_val = json.loads(v.diff_json) if getattr(v, "diff_json", None) else []
+        output.append({
             "version_no": v.version_no,
             "file_type": v.file_type,
             "change_summary": v.change_summary,
+            "diff": diff_val,
             "created_at": v.created_at.isoformat() if v.created_at else None,
             "download_url": f"/artifacts/{id}/download?version={v.version_no}",
-        }
-        for v in versions
-    ]
+        })
+    return output
+
+
+@router.get("/{id}/versions/{n}")
+async def get_artifact_version_detail(
+    id: int,
+    n: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Get detailed metadata and model snapshot for a specific version."""
+    ver = await get_version(db, id, version_no=n)
+    if not ver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version {n} for artifact {id} not found",
+        )
+
+    diff_val = json.loads(ver.diff_json) if ver.diff_json else []
+    sources_val = json.loads(ver.source_ids_json) if ver.source_ids_json else []
+    model_obj = json.loads(ver.model_json) if ver.model_json else {}
+
+    return {
+        "artifact_id": id,
+        "version_no": ver.version_no,
+        "file_type": ver.file_type,
+        "change_summary": ver.change_summary,
+        "diff": diff_val,
+        "source_ids": sources_val,
+        "created_at": ver.created_at.isoformat() if ver.created_at else None,
+        "download_url": f"/artifacts/{id}/download?version={ver.version_no}",
+        "model_json": model_obj,
+    }
+
+
+class EditArtifactRequest(BaseModel):
+    instruction: str
+    base_version: int | None = None
+
+
+@router.post("/{id}/edit")
+async def edit_artifact_endpoint(
+    id: int,
+    body: EditArtifactRequest,
+    user=Depends(get_current_user),
+):
+    """Conversational edit on an existing artifact."""
+    from app.agents.editor import edit_artifact
+    from app.core.database import get_sync_session
+
+    sync_db = get_sync_session()
+    try:
+        res = edit_artifact(
+            artifact_id=id,
+            instruction=body.instruction,
+            base_version=body.base_version,
+            db_session=sync_db,
+        )
+        return res.model_dump()
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    finally:
+        sync_db.close()
+
+
+class RevertArtifactRequest(BaseModel):
+    version: int
+
+
+@router.post("/{id}/revert")
+async def revert_artifact_endpoint(
+    id: int,
+    body: RevertArtifactRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Revert artifact to an older version by creating a NEW version snapshot."""
+    target_ver = await get_version(db, id, version_no=body.version)
+    if not target_ver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version {body.version} for artifact {id} not found",
+        )
+
+    latest_ver = await get_version(db, id)
+    parent_id = latest_ver.id if latest_ver else None
+
+    # Save as a NEW version
+    new_ver = await add_version(
+        db,
+        artifact_id=id,
+        model_json=target_ver.model_json,
+        source_file_path=target_ver.file_path,
+        change_summary=f"Reverted to version {body.version}",
+        source_ids=json.loads(target_ver.source_ids_json) if target_ver.source_ids_json else [],
+        parent_version_id=parent_id,
+        diff_json={"action": "revert", "target_version": body.version},
+    )
+
+    return {
+        "artifact_id": id,
+        "new_version_no": new_ver.version_no,
+        "reverted_from_version": body.version,
+        "change_summary": new_ver.change_summary,
+        "download_url": f"/artifacts/{id}/download?version={new_ver.version_no}",
+    }
+
+
+class ConvertArtifactRequest(BaseModel):
+    target_kind: Literal["docx", "pptx"]
+    slide_count: int = 10
+
+
+@router.post("/{id}/convert")
+async def convert_artifact_endpoint(
+    id: int,
+    body: ConvertArtifactRequest,
+    user=Depends(get_current_user),
+):
+    """Convert artifact (docx -> pptx or pptx -> docx) into a new artifact."""
+    from app.agents.converter import convert_artifact
+    from app.core.database import get_sync_session
+
+    sync_db = get_sync_session()
+    try:
+        res = convert_artifact(
+            artifact_id=id,
+            target_kind=body.target_kind,
+            slide_count=body.slide_count,
+            db_session=sync_db,
+        )
+        return res.model_dump()
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    finally:
+        sync_db.close()
 
 
 @router.get("/{id}/download")
@@ -233,6 +374,7 @@ async def download_artifact_version(
 
     filename = f"artifact_{id}_v{ver_rec.version_no}.{ver_rec.file_type}"
     return FileResponse(path=file_path, filename=filename, media_type=media_type)
+
 
 
 # ── Helper for Resolving Template & Profile ────────────────────────────────

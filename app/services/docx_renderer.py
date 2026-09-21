@@ -40,7 +40,7 @@ def render_docx(
         raise FileNotFoundError(f"DOCX template file not found: {template_path}")
 
     try:
-        doc = docx.Document(tmpl_path)
+        doc = docx.Document(str(tmpl_path))
     except Exception as exc:
         raise ValueError(f"Failed to open template DOCX '{tmpl_path.name}': {exc}") from exc
 

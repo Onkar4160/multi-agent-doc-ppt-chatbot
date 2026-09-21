@@ -37,10 +37,10 @@ def test_supervisor_plan_parsing():
     assert route_intent(state_gen) == "analyze_templates_node"
 
     state_edit: GraphState = {"plan": {"action": "edit"}}
-    assert route_intent(state_edit) == "stub_node"
+    assert route_intent(state_edit) == "edit_node"
 
     state_convert: GraphState = {"plan": {"action": "convert"}}
-    assert route_intent(state_convert) == "stub_node"
+    assert route_intent(state_convert) == "convert_node"
 
     state_ans: GraphState = {"plan": {"action": "answer"}}
     assert route_intent(state_ans) == "answer_node"

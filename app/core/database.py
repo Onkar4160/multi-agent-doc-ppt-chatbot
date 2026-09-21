@@ -56,3 +56,15 @@ async def create_tables():
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+def get_sync_session():
+    """Return a synchronous SQLAlchemy Session instance."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    settings = get_settings()
+    sync_url = settings.database_url.replace("sqlite+aiosqlite:", "sqlite:")
+    sync_engine = create_engine(sync_url)
+    return sessionmaker(bind=sync_engine)()
+

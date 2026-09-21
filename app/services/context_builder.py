@@ -42,6 +42,7 @@ def build_context(
     use_kb: bool = True,
     db_session: Session | None = None,
     trace_id: str | None = None,
+    start_id: int = 1,
 ) -> ContextResult:
     """Run research and retrieval, aggregating results into a ContextResult.
 
@@ -51,11 +52,12 @@ def build_context(
         use_kb: Whether to execute enterprise KB retrieval.
         db_session: Optional DB session for storing sources/traces.
         trace_id: Optional trace grouping ID.
+        start_id: Citation ID offset for SourceRegistry.
 
     Returns:
         ContextResult with sources_map, findings, kb_hits, and queries.
     """
-    registry = SourceRegistry(db_session=db_session)
+    registry = SourceRegistry(db_session=db_session, start_id=start_id)
     findings: list[FindingItem] = []
     kb_hits: list[dict[str, Any]] = []
     queries: list[str] = []

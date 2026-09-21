@@ -72,15 +72,39 @@ def main() -> None:
     output_dir = Path("data/outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    failures: list[str] = []
+
     for art in artifacts:
-        print(f"  - [{art['kind'].upper()}] {art['title']}")
+        title = art.get("title", "")
+        print(f"  - [{art['kind'].upper()}] {title}")
         print(f"    Stored File: {art.get('file_path')}")
+        if title.startswith("[MOCK]"):
+            msg = f"artifact title starts with '[MOCK]': {title!r}"
+            print(f"FAILED: {msg}")
+            failures.append(msg)
+
+    # Pipeline-level errors
+    for err in final_state.get("errors", []):
+        msg = f"pipeline error: {err}"
+        print(f"FAILED: {msg}")
+        failures.append(msg)
 
     # Total real LLM calls
     total_llm_calls = llm.stats.call_count - initial_call_count
     print(f"\nTotal Real LLM Calls: {total_llm_calls} (Budget max 8 calls)")
     print(f"Total Pipeline Execution Time: {total_time_s:.2f} seconds")
     print(f"LLM Stats: {llm.stats.summary()}")
+
+    print("\n" + "=" * 75)
+    if failures:
+        print(f"FAILED – {len(failures)} issue(s):")
+        for f in failures:
+            print(f"  • {f}")
+        print("=" * 75)
+        sys.exit(1)
+    else:
+        print("COMPLETED SUCCESSFULLY")
+        print("=" * 75)
 
 
 if __name__ == "__main__":

@@ -15,14 +15,19 @@ logger = logging.getLogger(__name__)
 class SourceRegistry:
     """Tracks web research and KB retrieval sources for citations within a run."""
 
-    def __init__(self, db_session: Session | None = None, project_id: int | None = None) -> None:
+    def __init__(
+        self,
+        db_session: Session | None = None,
+        project_id: int | None = None,
+        start_id: int = 1,
+    ) -> None:
         self._db_session = db_session
         self._project_id = project_id
         # {id: {"id": int, "kind": str, "title": str, "url": str, "snippet": str, "score": float, "published_date": str}}
         self._sources: dict[int, dict[str, Any]] = {}
         # deduplication index: key -> source_id
         self._dedupe_index: dict[str, int] = {}
-        self._next_id = 1
+        self._next_id = start_id
 
     def add(
         self,

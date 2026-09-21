@@ -40,6 +40,7 @@ async def add_version(
     change_summary: str | None = "Initial generation",
     source_ids: list[int] = [],
     parent_version_id: int | None = None,
+    diff_json: str | dict | list | None = None,
 ) -> ArtifactVersion:
     """Add a new version to an existing artifact and persist the rendered file to storage/artifacts/<artifact_id>/v<N>.<ext>."""
     src_path = Path(source_file_path)
@@ -61,6 +62,8 @@ async def add_version(
     # Copy rendered file to versioned artifact store
     shutil.copy2(src_path, dest_path)
 
+    d_json_str = diff_json if isinstance(diff_json, str) or diff_json is None else json.dumps(diff_json)
+
     version_record = ArtifactVersion(
         artifact_id=artifact_id,
         version_no=new_version_no,
@@ -70,6 +73,7 @@ async def add_version(
         parent_version_id=parent_version_id,
         change_summary=change_summary,
         source_ids_json=json.dumps(source_ids),
+        diff_json=d_json_str,
     )
     db.add(version_record)
     await db.flush()
