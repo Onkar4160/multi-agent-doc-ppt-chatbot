@@ -15,16 +15,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.llm.client import get_llm_client
+from app.llm.client import get_llm_client, get_search_cache_dir
 from app.models.trace import AgentTrace
 from app.services.source_registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
 
-def _get_cache_dir() -> Path:
-    p = Path(get_settings().storage_dir) / "search_cache"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+_get_cache_dir = get_search_cache_dir
 
 
 class SearchQueriesSchema(BaseModel):

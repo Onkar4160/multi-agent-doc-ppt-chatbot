@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Recent Developments in Generative AI",
+    "url": "https://www.youtube.com/watch?v=uF2a5kThM3g",
+    "snippet": "### Description\n3,897 views\nPosted: 2025-03-28\nIt seems like every day, there is a new advance in generative AI. Large multimodal  models (LMMs) and Small Language Models (SMLs) are becoming popular, while Retrieval-Augmented Generation (RAG) is boosting the accuracy of Gen AI models. Then, there are open-source models democratizing access to Gen AI, though not all of them are available or customizable for free. [...] ### Transcript\n[0:00] [Music]\n[0:06] the era of generative AI started on November 30th 2022 with the launch of chat GPT and ever since the generative\n[0:15] AI landscape has been expanding and evolving at a record Pace much faster than any other technology we've\n[0:23] seen it seems like every day there is a new advance in generative AI the changes are coming fast the sophistication of [...] [0:31] gen is growing by Leaps and Bounds so let's go through some of the biggest changes in the Gen landscape\n[0:39] number one the number of foundation models out there has exploded they're proliferating like crazy what's started\n[0:47] as a few key players has ballooned into hundreds of models some of which are highly specialized number two it's not just\n[0:57] large language models anymore now we have large multimodal models or",
+    "published_date": null
+  },
+  {
+    "title": "Advancements in generative AI",
+    "url": "https://www.aidataanalytics.network/data-science-ai/articles/advancements-in-generative-ai",
+    "snippet": "Jerome Smail\n\nJerome Smail    \n  06/18/2025\n\ngenerative ai advancements\n\nAdvancements in generative artificial intelligence (AI) occur at breakneck speed. In 2024, an AI-generated painting sold at auction for more than US$1 million. Meanwhile, a novel drug molecule discovered by a generative AI system began clinical trials. These events are more than just eye-catching headlines; they\u2019re signals of a profound shift in technological capability. [...] Generative AI refers to a class of AI models that go beyond mere pattern recognition and analysis. They create new content including realistic images, compelling reading material, lifelike audio, functional code and even innovative product designs. Over the last few years, the public has become more aware of the capabilities of generative AI through the public rollout of platforms such as OpenAI\u2019s ChatGPT, Google\u2019s Gemini and Adobe\u2019s Firefly. [...] Generative AI accelerates innovation in product development by enabling rapid prototyping and design exploration. Teams can automatically generate and evaluate hundreds of product variations, optimizing for criteria such as performance, cost, sustainability or aesthetics. This approach reduces development cycles and allows more time for creative iteration.",
+    "published_date": null
+  },
+  {
+    "title": "Advancements in AI and Machine Learning",
+    "url": "https://ep.jhu.edu/news/advancements-in-ai-and-machine-learning",
+    "snippet": "The field of generative AI has seen remarkable progress, particularly with the development of advanced Large Language Models (LLMs). Meta\u2019s recent release of Llama 4 includes models like Scout and Maverick that are designed to handle politically and socially contentious questions more effectively than their predecessors. They demonstrate reduced political bias and can process diverse data types, including text, video, images, and audio. \u200b",
+    "published_date": null
+  },
+  {
+    "title": "Generative AI Trends For All Facets of Business",
+    "url": "https://www.forrester.com/technology/generative-ai",
+    "snippet": "Generative AI is advancing rapidly, consistently pushing the boundaries of what artificial intelligence can achieve. These developments are not just incremental; they are transformative, opening new doors for innovation and redefining how businesses approach challenges. From autonomous agents to hyperpersonalized solutions, the latest trends in generative AI are shaping the future of industries, offering unparalleled opportunities for those ready to adapt and innovate. [...] By leveraging generative AI to harness and contextualize vast amounts of internal data, organizations can unlock unprecedented levels of productivity. These advancements promise to transform how businesses store, access, and utilize information, fostering more agile and informed decision-making processes.\n\nPersonalized AI\n\nAnother breakthrough lies in the evolution of personalized AI systems designed to cater to individual user preferences and needs. Personalized AI is poised to:",
+    "published_date": null
+  }
+]

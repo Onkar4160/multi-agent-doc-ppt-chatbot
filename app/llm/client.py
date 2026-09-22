@@ -21,10 +21,21 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
-def _get_cache_dir() -> Path:
+def get_cache_dir() -> Path:
+    """Return cache directory for LLM calls, creating it if missing."""
     p = Path(get_settings().storage_dir) / "llm_cache"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def get_search_cache_dir() -> Path:
+    """Return cache directory for web search results, creating it if missing."""
+    p = Path(get_settings().storage_dir) / "search_cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+_get_cache_dir = get_cache_dir
 
 
 @dataclass
@@ -91,7 +102,7 @@ class LLMClient:
                 )
             self._client = genai.Client(api_key=api_key)
 
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        get_cache_dir()
 
     @property
     def stats(self) -> LLMCallStats:
@@ -410,7 +421,7 @@ class LLMClient:
     @staticmethod
     def _read_cache(key: str) -> str | None:
         """Read cached response from disk."""
-        path = _get_cache_dir() / f"{key}.json"
+        path = get_cache_dir() / f"{key}.json"
         if path.exists():
             return path.read_text(encoding="utf-8")
         return None
@@ -418,7 +429,7 @@ class LLMClient:
     @staticmethod
     def _write_cache(key: str, data: str) -> None:
         """Write response to disk cache."""
-        path = _get_cache_dir() / f"{key}.json"
+        path = get_cache_dir() / f"{key}.json"
         path.write_text(data, encoding="utf-8")
 
 

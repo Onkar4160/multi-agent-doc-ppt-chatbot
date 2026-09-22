@@ -19,8 +19,13 @@ def _get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        db_url = settings.database_url
+        if db_url.startswith("sqlite:///"):
+            db_url = "sqlite+aiosqlite:///" + db_url[len("sqlite:///"):]
+        elif db_url.startswith("sqlite:") and not db_url.startswith("sqlite+aiosqlite:"):
+            db_url = "sqlite+aiosqlite:" + db_url[len("sqlite:"):]
         _engine = create_async_engine(
-            settings.database_url,
+            db_url,
             echo=False,
             future=True,
         )
