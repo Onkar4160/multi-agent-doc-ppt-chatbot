@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Welcome to Java for Python Programmers \u2014 Java for Python Programmers",
+    "url": "https://runestone.academy/ns/books/published/java4python/index.html",
+    "snippet": "Contents:\n\n Java for Python Programmers\n  + Preface\n  + Introduction\n  + Why Learn another programming Language?\n  + Lets look at a Java Program\n  + Java Data Types\n  + Conditionals\n  + Loops and Iteration\n  + Defining Classes in Java\n  + Naming Conventions\n  + Common Mistakes\n  + Java Documentation\n  + Colophon\n\n# Indices and tables\u00b6\n\n Index\n Module Index\n Search Page\n\nYou have attempted of activities on this page",
+    "published_date": null
+  },
+  {
+    "title": "Python vs Java 2026: 10 Benchmarks Expose a 10-50x Speed Gap",
+    "url": "https://tech-insider.org/python-vs-java-2026",
+    "snippet": "This dominance is self-reinforcing. Research papers publish code in Python. Tutorials teach in Python. Pre-trained models distribute through Python packages. New AI frameworks launch with Python bindings first and sometimes never add Java support. For anyone building with large language models, computer vision, or reinforcement learning in 2026, Python is the only practical choice. Our PyTorch deep learning tutorial covers the fundamentals for getting started. [...] The tooling ecosystem reflects these priorities. Python developers rely on formatters like Black, linters like Ruff (which has largely replaced flake8 and pylint in 2026), and type checkers like mypy or Pyright. Java developers use IntelliJ IDEA or Eclipse with built-in refactoring, Maven or Gradle for build management, and the compiler itself as the first line of quality assurance. For an overview of how AI tools are accelerating development in both languages, see our AI coding tools guide. [...] The recommended learning path in 2026 is: start with Python, build projects in data analysis or web development, then learn Java (or Kotlin) to understand typed languages and enterprise patterns. This combination covers the broadest range of career opportunities. For language fundamentals, our TypeScript vs JavaScript comparison offers a parallel perspective on the typed vs untyped language debate.\n\n## Pricing and Infrastructure Cost Comparison",
+    "published_date": null
+  },
+  {
+    "title": "Java (programming language) - Wikipedia",
+    "url": "https://en.wikipedia.org/wiki/Java_(programming_language)",
+    "snippet": "As of March 2026,( Java 26 is the current version.\n\n## History\n\nSee also: Java (software platform) \u00a7 History#History \"Java (software platform)\")\n\n\"), the Java mascot [...] Java (programming language) \"Category:Java (programming language)\")\n C programming language family\n Class-based programming languages\n Concurrent programming languages\n Java (software platform) \"Category:Java (software platform)\")\n Java specification requests\n JVM programming languages\n Multi-paradigm programming languages\n Object-oriented programming languages\n Programming languages created in 1995\n Programming languages\n Statically typed programming languages\n Sun Microsystems [...] As of June 2026( Java 8, 11, 17, 21, and 25 are supported as long-term support (LTS) versions.\n\nOracle released the last zero-cost public update for the legacy version Java 8 LTS in January 2019 for commercial use, although it will otherwise still support Java 8 with public updates for personal use indefinitely. Other vendors such as Adoptium continue to offer free builds of OpenJDK's long-term support (LTS) versions. These builds may include additional security patches and bug fixes.",
+    "published_date": null
+  },
+  {
+    "title": "What Is Python? the Programming Language, Explained",
+    "url": "https://www.businessinsider.com/what-is-python",
+    "snippet": "Python is a multipurpose programming language, and it has applicability pretty much anywhere that uses data, mathematical computation, or lines of code. That means unlike Java, for instance, Python isn't confined to being used for web development. [...] Like most programming languages, Python works in tandem with an interpreter that executes the finalized lines of codes. There are lots of free resources to learn the Python coding language, which, with its basis in English syntax, is considered one of the least fussy and most straightforward coding languages to learn and read. [...] One quick side note about Python: The serpentine namesake isn't an abbreviation or acronym, but rather, simply the result of Python creator Guido van Rossum being an avid Monty Python fan.\n\nFor anyone from corporate software engineers to casual coders, Python is a viable, accessible programming language.\n\nPython can be used for small tasks, like powering a simple Reddit moderator bot, or executing extremely complex code, like analyzing massive amounts of financial data for a hedge fund.",
+    "published_date": null
+  },
+  {
+    "title": "What Is Python? the Programming Language, Explained",
+    "url": "https://www.businessinsider.com/guides/tech/what-is-python",
+    "snippet": "Python is a multipurpose programming language, and it has applicability pretty much anywhere that uses data, mathematical computation, or lines of code. That means unlike Java, for instance, Python isn't confined to being used for web development. [...] Like most programming languages, Python works in tandem with an interpreter that executes the finalized lines of codes. There are lots of free resources to learn the Python coding language, which, with its basis in English syntax, is considered one of the least fussy and most straightforward coding languages to learn and read. [...] One quick side note about Python: The serpentine namesake isn't an abbreviation or acronym, but rather, simply the result of Python creator Guido van Rossum being an avid Monty Python fan.\n\nFor anyone from corporate software engineers to casual coders, Python is a viable, accessible programming language.\n\nPython can be used for small tasks, like powering a simple Reddit moderator bot, or executing extremely complex code, like analyzing massive amounts of financial data for a hedge fund.",
+    "published_date": null
+  }
+]

@@ -118,7 +118,7 @@ Open http://localhost:8501 and log in with `DEMO_USERNAME` / `DEMO_PASSWORD`. AP
  
 ## Usage
  
-1. In the sidebar, upload your templates: `data/sample_templates/Company_Proposal.docx` and `data/sample_templates/Company_Template.pptx`. Pick them as the DOCX and PPTX template.
+1. In the sidebar, upload your templates: `data/sample_templates/Company_Proposal.docx` and `data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx`. Pick them as the DOCX and PPTX template.
 2. Click **Ingest sample KB** (or upload your own knowledge files).
 3. Ask:
    > Research the latest Generative AI trends and create a proposal and 12-slide presentation using the same tone and style as the uploaded files.

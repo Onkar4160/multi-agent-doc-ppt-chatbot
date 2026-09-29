@@ -31,7 +31,10 @@ PLACEHOLDER_REGEX = re.compile(
     r"(click to add|lorem ipsum|insert text|\[placeholder\]|<placeholder>|sample text)",
     re.IGNORECASE,
 )
-NUMBER_OR_PERCENT_REGEX = re.compile(r"(\d+%|\$\d+|\d+\s*percent|\b\d{2,}\b)")
+NUMBER_OR_PERCENT_REGEX = re.compile(
+    r"(\d+%|\$\d+|\d+\s*percent|\b\d{2,}\b|\bv?\d+\.\d+\b|\b(?:19|20)\d{2}\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b|\bversion\s+\d+\b|\brelease\s+\d+\b)",
+    re.IGNORECASE,
+)
 
 
 def validate_outputs(
@@ -40,6 +43,8 @@ def validate_outputs(
     expected_slide_count: int = 12,
     valid_source_ids: set[int] | None = None,
     expected_doc_outline: list[str] | None = None,
+    follow_template_outline: bool = False,
+    min_target_words: int | None = 1200,
 ) -> ValidationReport:
     """Perform deterministic quality validation on DocumentModel and DeckModel.
 
@@ -49,6 +54,7 @@ def validate_outputs(
         expected_slide_count: Target slide count from Plan.
         valid_source_ids: Set of valid integer source IDs in registry.
         expected_doc_outline: List of expected section headings.
+        follow_template_outline: If True, enforce fuzzy match against template headings.
 
     Returns:
         ValidationReport containing pass status, score (0-100), and issue list.
@@ -119,26 +125,54 @@ def validate_outputs(
                         ))
                 # Check numbers/percentages citation
                 if NUMBER_OR_PERCENT_REGEX.search(b.text) and not getattr(b, "source_ids", []):
+                    b_snip = b.text[:70] + "..." if len(b.text) > 70 else b.text
                     issues.append(ValidationIssue(
-                        severity="warning",
+                        severity="error",
                         where=slide_ref,
-                        message=f"Bullet on slide {idx} contains numbers/metrics but lacks citation source_ids.",
+                        message=f"Bullet on slide {idx} contains numbers/dates/metrics ('{b_snip}') but lacks citation source_ids.",
                     ))
 
     # ── 2. Validate DOCX Document Model ──────────────────────────────────────
     if doc_model:
         sections = doc_model.sections
         
-        # Check section count
-        if len(sections) < 6:
+        # Check section count (proportional / soft check)
+        if len(sections) == 0:
             issues.append(ValidationIssue(
                 severity="error",
                 where="docx:document",
-                message=f"DOCX has only {len(sections)} sections; minimum 6 required.",
+                message="DOCX has zero sections; minimum 1 required.",
+            ))
+        elif len(sections) < 3:
+            issues.append(ValidationIssue(
+                severity="warning",
+                where="docx:document",
+                message=f"DOCX has only {len(sections)} sections; document may be unusually short given the brief.",
             ))
 
-        # Check outline fuzzy match
-        if expected_doc_outline:
+        # Check total word count against minimum target
+        total_word_count = sum(
+            len(getattr(b, "text", "").split()) + sum(len(it.split()) for it in getattr(b, "items", []))
+            for sec in sections
+            for b in sec.blocks
+        )
+        if min_target_words:
+            half_target = min_target_words // 2
+            if total_word_count < half_target:
+                issues.append(ValidationIssue(
+                    severity="error",
+                    where="docx:document",
+                    message=f"DOCX word count ({total_word_count}) is under 50% of minimum target ({half_target} words); document must be expanded.",
+                ))
+            elif total_word_count < min_target_words:
+                issues.append(ValidationIssue(
+                    severity="warning",
+                    where="docx:document",
+                    message=f"DOCX word count ({total_word_count}) is below target {min_target_words} words.",
+                ))
+
+        # Check outline fuzzy match only when the brief indicates the template's structure should be followed
+        if expected_doc_outline and follow_template_outline:
             generated_headings = [s.heading.lower() for s in sections]
             for exp_h in expected_doc_outline[:6]:
                 kw = exp_h.split()[-1].lower() if exp_h.split() else exp_h.lower()
@@ -179,10 +213,11 @@ def validate_outputs(
 
                 # Check numbers/percentages citation
                 if NUMBER_OR_PERCENT_REGEX.search(b_text) and not getattr(block, "source_ids", []):
+                    b_snip = b_text[:70] + "..." if len(b_text) > 70 else b_text
                     issues.append(ValidationIssue(
-                        severity="warning",
+                        severity="error",
                         where=sec_ref,
-                        message=f"Section {idx} text contains numbers/metrics but lacks citation source_ids.",
+                        message=f"Section {idx} text contains numbers/dates/metrics ('{b_snip}') but lacks citation source_ids.",
                     ))
 
     # Compute overall score and pass status

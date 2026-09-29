@@ -19,7 +19,7 @@ from app.services.docx_renderer import render_docx
 from app.services.pptx_renderer import render_pptx
 
 DOCX_TEMPLATE = Path("data/sample_templates/Company_Proposal.docx")
-PPTX_TEMPLATE = Path("data/sample_templates/Company_Template.pptx")
+PPTX_TEMPLATE = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 
 
 def test_docx_renderer_quality_and_layout(tmp_path: Path):
@@ -148,3 +148,218 @@ def test_pptx_renderer_quality_and_font_minimums(tmp_path: Path):
                 for p in shape.text_frame.paragraphs:
                     if p.font.size:
                         assert p.font.size.pt >= 14.0, f"Slide {slide_idx} paragraph font size {p.font.size.pt} is below min 14pt"
+
+
+def test_strip_markdown_helper():
+    """Test regex helper strips stray markdown markers like **, __, and leading #'s."""
+    from app.services.docx_renderer import strip_markdown as docx_strip_md
+    from app.services.pptx_renderer import strip_markdown as pptx_strip_md
+
+    sample = "### **Executive Summary** with __important__ metrics"
+    res = docx_strip_md(sample)
+    assert "**" not in res
+    assert "__" not in res
+    assert "#" not in res
+    assert res == "Executive Summary with important metrics"
+
+    assert pptx_strip_md("**Bold Title**") == "Bold Title"
+    assert pptx_strip_md("__Underlined Subtitle__") == "Underlined Subtitle"
+
+
+def test_empty_block_and_slide_skipped(tmp_path: Path):
+    """Test that zero-content blocks, sections, and slides are skipped rather than rendered blank."""
+    # 1. DOCX empty section & block skipping
+    doc_model = DocumentModel(
+        title="Test Doc",
+        sections=[
+            Section(
+                heading="1. Valid Section",
+                level=1,
+                blocks=[
+                    ParagraphBlock(text="Valid text block.", source_ids=[]),
+                    ParagraphBlock(text="   ", source_ids=[]),  # Empty block: should be skipped
+                ],
+            ),
+            Section(
+                heading="2. Empty Section",
+                level=1,
+                blocks=[],  # Zero content: section must be skipped entirely
+            ),
+        ],
+    )
+    out_docx = tmp_path / "test_empty_skipped.docx"
+    render_docx(doc_model, DOCX_TEMPLATE, out_path=out_docx)
+    doc = docx.Document(out_docx)
+    headings = [p.text for p in doc.paragraphs if p.style and p.style.name.startswith("Heading")]
+    assert "1. Valid Section" in headings
+    assert "2. Empty Section" not in headings
+
+    # 2. PPTX empty slide skipping
+    deck_model = DeckModel(
+        title="Test Deck",
+        slides=[
+            SlideModel(role="title", title="Slide 1", subtitle="Sub"),
+            SlideModel(role="title_content", title="", bullets=[]),  # Zero content: should be skipped
+            SlideModel(role="title_content", title="Slide 3", bullets=[BulletItem(text="Bullet content", level=0)]),
+        ],
+    )
+    out_pptx = tmp_path / "test_empty_skipped.pptx"
+    render_pptx(deck_model, PPTX_TEMPLATE, out_path=out_pptx)
+    prs = pptx.Presentation(out_pptx)
+    assert len(prs.slides) == 2
+
+
+def test_research_report_no_timeline_pricing():
+    """Test that a research_report plan on a proposal-template workspace produces no Timeline/Pricing section."""
+    from app.agents.doc_generator import generate_document_model
+    from app.agents.supervisor import parse_plan
+
+    plan_report = parse_plan("make a report explaining X's developments")
+    assert plan_report.document_type == "research_report"
+
+    plan_prop = parse_plan("create a proposal for X")
+    assert plan_prop.document_type == "proposal"
+
+    proposal_profile = analyze_document(DOCX_TEMPLATE)
+    assert any("timeline" in item.get("heading", "").lower() or "pricing" in item.get("heading", "").lower() for item in proposal_profile.doc_style.outline)
+
+    # Generate document with research_report document_type
+    doc_model = generate_document_model(
+        brief="Explain developments in quantum computing",
+        profile=proposal_profile,
+        document_type=plan_report.document_type,
+    )
+    section_headings = [s.heading.lower() for s in doc_model.sections]
+    assert not any("timeline" in h or "pricing" in h or "commercial" in h for h in section_headings)
+
+
+def test_auto_decoration_applied_when_dec_score_zero(tmp_path: Path):
+    """Test that slides on zero-decoration layouts receive auto-decoration and decorated layouts are untouched."""
+    profile = analyze_presentation(PPTX_TEMPLATE)
+    dec_scores = {l.index: l.decoration_score for l in profile.ppt_style.layouts}
+
+    deck_model = DeckModel(
+        title="Decoration Test Deck",
+        slides=[
+            # Role 'title' resolves to 1_Title Slide (index 0, dec_score=30)
+            SlideModel(role="title", title="Decorated Title Slide", subtitle="Should not have auto-decoration"),
+            # Role 'title_content' resolves to Title and Content (index 9, dec_score=0)
+            SlideModel(
+                role="title_content",
+                title="Plain Layout Content Slide",
+                bullets=[BulletItem(text="First key strategic initiative", level=0)],
+            ),
+        ],
+    )
+
+    out_file = tmp_path / "test_auto_dec.pptx"
+    render_pptx(deck_model, PPTX_TEMPLATE, profile=profile, out_path=out_file)
+    assert out_file.exists()
+
+    prs = pptx.Presentation(out_file)
+    assert len(prs.slides) == 2
+
+    # Slide 1 (1_Title Slide, dec_score > 0): untouched
+    slide1_auto_shapes = [s for s in prs.slides[0].shapes if getattr(s, "name", "").startswith("AutoDecoration")]
+    assert len(slide1_auto_shapes) == 0, "Slide 1 with dec_score > 0 should not have auto-decoration"
+
+    # Slide 2 (Title and Content, dec_score == 0): auto-decoration applied
+    slide2_auto_shapes = [s for s in prs.slides[1].shapes if getattr(s, "name", "").startswith("AutoDecoration")]
+    assert len(slide2_auto_shapes) >= 1, "Slide 2 with dec_score == 0 must have auto-decoration"
+
+    # Verify z-order: auto-decoration shapes should be near the start of _spTree (before placeholder shapes)
+    sp_tree_children = [c.tag.split("}")[-1] for c in prs.slides[1].shapes._spTree]
+    accent_bar_idx = -1
+    first_ph_idx = -1
+    for idx, c in enumerate(prs.slides[1].shapes._spTree):
+        shape_name = c.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}cNvPr")
+        if shape_name is not None and shape_name.get("name", "").startswith("AutoDecoration"):
+            accent_bar_idx = idx
+            break
+    for idx, shape in enumerate(prs.slides[1].shapes):
+        if shape.is_placeholder:
+            for tree_idx, c in enumerate(prs.slides[1].shapes._spTree):
+                if c == shape.element:
+                    first_ph_idx = tree_idx
+                    break
+            break
+    if accent_bar_idx != -1 and first_ph_idx != -1:
+        assert accent_bar_idx < first_ph_idx, "Auto-decoration shape must be positioned behind placeholders in z-order"
+
+
+def test_artifact_version_stores_pptx_file_type():
+    """Test BUG 2 fix: node_finalize must save file_type='pptx' for rendered PPTX artifacts."""
+    from app.agents.graph import _get_sync_session, node_finalize
+    from app.models.artifact import ArtifactVersion
+
+    state = {
+        "deck_model": {
+            "title": "FileType PPTX Regression Deck",
+            "slides": [
+                {"role": "title", "title": "Deck Title", "subtitle": "Subtitle"}
+            ],
+        },
+        "template_profiles": {
+            "ppt_template_path": str(PPTX_TEMPLATE),
+        },
+        "registry": {},
+    }
+
+    res = node_finalize(state)
+    assert res is not None
+
+    sess = _get_sync_session()
+    assert sess is not None
+    try:
+        versions = sess.query(ArtifactVersion).all()
+        pptx_vers = [v for v in versions if v.file_path.endswith(".pptx")]
+        assert len(pptx_vers) > 0, "Expected at least one PPTX ArtifactVersion record"
+        for v in pptx_vers:
+            assert v.file_type == "pptx", f"Expected file_type='pptx', found '{v.file_type}'"
+    finally:
+        sess.close()
+
+
+def test_markdown_sanitization_in_renderers(tmp_path: Path):
+    """Test that sample strings with markdown (**bold**, __x__) are completely stripped in rendered output."""
+    from app.services.docx_renderer import strip_markdown as docx_strip_md
+    from app.services.pptx_renderer import strip_markdown as pptx_strip_md
+
+    sample_md = "**Critical Risk**: The system has __high__ latency with **immediate** impact."
+    cleaned_docx = docx_strip_md(sample_md)
+    cleaned_pptx = pptx_strip_md(sample_md)
+
+    assert cleaned_docx == "Critical Risk: The system has high latency with immediate impact."
+    assert cleaned_pptx == "Critical Risk: The system has high latency with immediate impact."
+    assert "**" not in cleaned_docx and "__" not in cleaned_docx
+    assert "**" not in cleaned_pptx and "__" not in cleaned_pptx
+
+
+def test_duplicate_submission_blocked_within_five_seconds():
+    """Test UI logic: duplicate submission of identical message within 5s is ignored."""
+    from unittest.mock import patch
+    import streamlit as st
+    from ui.streamlit_app import _send_message
+
+    st.session_state["chat_history"] = []
+    st.session_state["selected_file_ids"] = []
+    st.session_state["session_id"] = None
+    st.session_state["request_in_flight"] = False
+    st.session_state["last_submission_text"] = ""
+    st.session_state["last_submission_time"] = 0.0
+
+    with patch("ui.streamlit_app._post") as mock_post:
+        mock_post.return_value = {"run_id": "mock_run_1"}
+        with patch("ui.streamlit_app._poll_run") as mock_poll:
+            mock_poll.return_value = {"status": "done", "reply": "Acknowledged"}
+
+            # First submission
+            _send_message("Generate proposal on AI trends")
+            assert len(st.session_state.chat_history) == 2
+
+            # Identical resubmission immediately within 5 seconds
+            _send_message("Generate proposal on AI trends")
+            assert len(st.session_state.chat_history) == 2, "Identical submission within 5 seconds should be ignored"
+
+
+

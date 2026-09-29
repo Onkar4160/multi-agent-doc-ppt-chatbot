@@ -36,7 +36,19 @@ def setup_test_env():
     reset_db()
     reset_llm_client()
 
+    # Ensure all tables are created on the test DB
+    from sqlalchemy import create_engine
+    from app.core.database import Base
+    import app.models  # noqa: F401
+
+    sync_engine = create_engine(f"sqlite:///{_temp_db_path.as_posix()}")
+    Base.metadata.create_all(sync_engine)
+    from app.core.database import run_migrations_sync
+    with sync_engine.begin() as conn:
+        run_migrations_sync(conn)
+
     yield
+
 
     reset_settings()
     reset_db()

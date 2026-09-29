@@ -154,7 +154,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     docx_tmpl_path = Path("data/sample_templates/Company_Proposal.docx")
-    pptx_tmpl_path = Path("data/sample_templates/Company_Template.pptx")
+    pptx_tmpl_path = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 
     if not docx_tmpl_path.exists() or not pptx_tmpl_path.exists():
         print("Error: Missing sample templates.")

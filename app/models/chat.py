@@ -29,3 +29,4 @@ class ChatMessage(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant | system
     content: Mapped[str] = mapped_column(Text, nullable=False)
     run_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)

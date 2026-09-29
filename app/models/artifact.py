@@ -17,6 +17,8 @@ class Artifact(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     artifact_type: Mapped[str] = mapped_column(String(10), nullable=False)  # docx | pptx
+    session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class ArtifactVersion(Base, TimestampMixin):
@@ -36,4 +38,5 @@ class ArtifactVersion(Base, TimestampMixin):
     )
     change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of Source ids
+    sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON map of {id: {title, url_or_filename, kind, accessed_at}}
     diff_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list/dict of diff changes

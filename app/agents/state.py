@@ -23,3 +23,5 @@ class GraphState(TypedDict, total=False):
     retry_count: int
     reply: str
     errors: list[str]
+    session_context: dict[str, Any] | None
+    evidence_pack: list[dict[str, Any]] | None

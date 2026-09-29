@@ -21,12 +21,16 @@ async def create_artifact(
     db: AsyncSession,
     kind: str,
     title: str,
+    session_id: str | None = None,
+    run_id: str | None = None,
 ) -> Artifact:
     """Create a new top-level Artifact record."""
     clean_type = "pptx" if kind.lower() == "pptx" else "docx"
     artifact = Artifact(
         title=title,
         artifact_type=clean_type,
+        session_id=session_id,
+        run_id=run_id,
     )
     db.add(artifact)
     await db.flush()
@@ -83,9 +87,12 @@ async def add_version(
     return version_record
 
 
-async def list_artifacts(db: AsyncSession) -> Sequence[Artifact]:
-    """List all artifacts."""
-    result = await db.execute(select(Artifact).order_by(Artifact.id.desc()))
+async def list_artifacts(db: AsyncSession, session_id: str | None = None) -> Sequence[Artifact]:
+    """List artifacts, optionally filtered by session_id."""
+    stmt = select(Artifact)
+    if session_id:
+        stmt = stmt.where(Artifact.session_id == session_id)
+    result = await db.execute(stmt.order_by(Artifact.id.desc()))
     return result.scalars().all()
 
 

@@ -237,7 +237,7 @@ def test_condense_keeps_slide_count_and_order(sample_deck_model: DeckModel):
 
 def test_template_layouts_preserved():
     """Verify profile layout mapping is correctly retrieved from template analyzer."""
-    tmpl_path = Path("data/sample_templates/Company_Template.pptx")
+    tmpl_path = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
     if tmpl_path.exists():
         profile = analyze_presentation(tmpl_path)
         assert profile.ppt_style is not None

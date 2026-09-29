@@ -26,7 +26,7 @@ _get_cache_dir = get_search_cache_dir
 
 class SearchQueriesSchema(BaseModel):
     """Schema for LLM query generation step."""
-    queries: list[str] = Field(description="Up to 3 focused search queries containing year or 'latest'.")
+    queries: list[str] = Field(description="3 search queries covering fundamentals/overview, current status and recent developments, and use cases/ecosystem/comparisons.")
 
 
 class FindingItem(BaseModel):
@@ -50,7 +50,7 @@ class ResearchResult(BaseModel):
 # ── Search API Client with Fallback & Cache ────────────────────────────────
 
 def _search_web_single_query(
-    query: str, today_str: str, max_results: int = 4
+    query: str, today_str: str, max_results: int = 5
 ) -> list[dict[str, Any]]:
     """Execute search for a single query using Tavily, falling back to DuckDuckGo."""
     cache_dir = _get_cache_dir()
@@ -146,28 +146,38 @@ def research(
 
     # ── LLM Call 1: Generate up to 3 queries ───────────────────────────────
     query_prompt = (
-        f"Topic: '{topic}'\nCurrent Year: 2026\n"
-        "Generate 1 to 3 concise, highly focused web search queries to find current, authoritative facts, "
-        "market statistics, and case studies. Include '2026' or 'latest' where relevant."
+        f"User Brief / Topic: '{topic}'\n"
+        "Derive 3 concise, highly focused search queries covering DIFFERENT aspects:\n"
+        "1. fundamentals, architecture, and overview;\n"
+        "2. current status and recent developments;\n"
+        "3. practical use cases, ecosystem, and comparisons.\n"
+        "Do NOT automatically include '2026' or 'latest' unless the brief is about a recent period or a time-sensitive topic."
     )
+    fallback_queries = [
+        f"{topic} overview fundamentals",
+        f"{topic} current status developments",
+        f"{topic} use cases ecosystem comparisons",
+    ]
     
     try:
         q_response = llm.generate_json(
             prompt=query_prompt,
             schema=SearchQueriesSchema,
-            system="You are an expert market research analyst. Output 1-3 search queries.",
+            system="You are an expert research analyst. Output 3 search queries covering different aspects.",
         )
-        queries = q_response.queries[:3] if q_response.queries else [f"{topic} latest 2026"]
+        queries = q_response.queries[:3] if q_response.queries else fallback_queries
     except Exception as exc:
         logger.warning(f"Query generation LLM call failed: {exc}. Using fallback query.")
-        queries = [f"{topic} 2026 enterprise strategy"]
+        queries = fallback_queries
 
     # ── Execute Search & Register Sources ──────────────────────────────────
+    import urllib.parse
     registered_source_ids: list[int] = []
     registered_snippets: list[dict[str, Any]] = []
+    domain_counts: dict[str, int] = {}
 
     for q in queries:
-        raw_results = _search_web_single_query(q, today_str=today_str, max_results=4)
+        raw_results = _search_web_single_query(q, today_str=today_str, max_results=5)
         for res in raw_results:
             url = res.get("url", "").strip()
             title = res.get("title", "Web Source").strip()
@@ -175,6 +185,10 @@ def research(
             pub_date = res.get("published_date")
 
             if not snippet or not url:
+                continue
+
+            domain = urllib.parse.urlparse(url).netloc.lower()
+            if domain and domain_counts.get(domain, 0) >= 2:
                 continue
 
             sid = registry.add(
@@ -185,6 +199,9 @@ def research(
                 score=0.8,
                 published_date=pub_date,
             )
+            if domain:
+                domain_counts[domain] = domain_counts.get(domain, 0) + 1
+
             if sid not in registered_source_ids:
                 registered_source_ids.append(sid)
                 registered_snippets.append({

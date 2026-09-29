@@ -74,18 +74,34 @@ def _run_graph_background(run_id: str, session_id: str, user_message: str, file_
                 })
                 run_rec.finished_at = datetime.utcnow()
 
-            # Create assistant ChatMessage record
+            # Create assistant ChatMessage record with meta_json
+            arts = final_state.get("artifacts", [])
+            meta_dict = {
+                "artifacts": [
+                    {
+                        "artifact_id": a.get("artifact_id"),
+                        "version": a.get("version"),
+                        "kind": a.get("kind"),
+                    }
+                    for a in arts
+                ]
+            }
             assistant_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
                 content=final_state.get("reply", ""),
                 run_id=run_id,
+                meta_json=json.dumps(meta_dict),
             )
             db_sess.add(assistant_msg)
             db_sess.commit()
-            db_sess.close()
         except Exception as db_exc:
             logger.warning(f"Failed to update AgentRun DB state in background runner: {db_exc}")
+        finally:
+            try:
+                db_sess.close()
+            except Exception:
+                pass
 
 
 @router.post("/chat", status_code=status.HTTP_202_ACCEPTED)
@@ -220,6 +236,11 @@ async def get_session_messages(
     user=Depends(get_current_user),
 ):
     """Retrieve message history for a chat session."""
+    s_stmt = select(ChatSession).where(ChatSession.session_id == session_id)
+    s_res = await db.execute(s_stmt)
+    if not s_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
     stmt = select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.id.asc())
     res = await db.execute(stmt)
     messages = res.scalars().all()
@@ -230,7 +251,60 @@ async def get_session_messages(
             "role": m.role,
             "content": m.content,
             "run_id": m.run_id,
+            "meta_json": m.meta_json,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in messages
     ]
+
+
+@router.get("/sessions/{session_id}/artifacts")
+async def get_session_artifacts(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Retrieve artifacts and their versions for a chat session."""
+    s_stmt = select(ChatSession).where(ChatSession.session_id == session_id)
+    s_res = await db.execute(s_stmt)
+    if not s_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+    from app.models.artifact import Artifact, ArtifactVersion
+
+    art_stmt = select(Artifact).where(Artifact.session_id == session_id).order_by(Artifact.id.asc())
+    art_res = await db.execute(art_stmt)
+    artifacts = art_res.scalars().all()
+
+    output = []
+    for a in artifacts:
+        v_stmt = select(ArtifactVersion).where(ArtifactVersion.artifact_id == a.id).order_by(ArtifactVersion.version_no.asc())
+        v_res = await db.execute(v_stmt)
+        vers = v_res.scalars().all()
+        latest_ver = vers[-1].version_no if vers else 1
+
+        v_list = []
+        for v in vers:
+            diff_val = json.loads(v.diff_json) if getattr(v, "diff_json", None) else []
+            v_list.append({
+                "version_no": v.version_no,
+                "file_type": v.file_type,
+                "change_summary": v.change_summary,
+                "diff": diff_val,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+                "download_url": f"/artifacts/{a.id}/download?version={v.version_no}",
+            })
+
+        output.append({
+            "id": a.id,
+            "title": a.title,
+            "artifact_type": a.artifact_type,
+            "session_id": a.session_id,
+            "run_id": a.run_id,
+            "latest_version": latest_ver,
+            "versions": v_list,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+
+    return output
+

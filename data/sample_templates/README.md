@@ -6,7 +6,7 @@ This directory contains realistic sample templates, enterprise knowledge base do
 
 ### 1. `data/sample_templates/`
 - **`Company_Proposal.docx`**: Styled AI consulting proposal template for NexaWorks AI Solutions (Pune). Includes custom cover block, typography, styled tables (Timeline & Pricing), team section, and header/footer. *Note: Executive Summary is omitted intentionally to demo dynamic generation.*[REQUIRED]
-- **`Company_Template.pptx`**: Master corporate presentation template with slide masters, brand colors, and layouts for generating presentation decks.
+- **`Green Cream Simple Aesthetic Watercolor Presentation.pptx`**: Master corporate presentation template with slide masters, brand colors, and layouts for generating presentation decks.
 
 ### 2. `data/sample_kb/`
 - **`company_overview.md`**: Markdown overview of NexaWorks AI Solutions (location, history, metrics).

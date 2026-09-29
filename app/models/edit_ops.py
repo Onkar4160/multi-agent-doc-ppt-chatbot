@@ -80,6 +80,14 @@ class RefreshWithWebOp(BaseModel):
     scope: Any = Field(default="all", description="'all' or list of target section headings / slide indexes.")
 
 
+class UpdateTitleOp(BaseModel):
+    """Update title and subtitle of document or deck when scope changes."""
+
+    type: Literal["update_title"] = "update_title"
+    title: str = Field(description="New overarching document/deck title.")
+    subtitle: str | None = Field(default=None, description="New overarching document/deck subtitle.")
+
+
 Op = Union[
     AddSectionOp,
     UpdateSectionOp,
@@ -90,6 +98,7 @@ Op = Union[
     MoveSlideOp,
     CondenseDeckOp,
     RefreshWithWebOp,
+    UpdateTitleOp,
 ]
 
 

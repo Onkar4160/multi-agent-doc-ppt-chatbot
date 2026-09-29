@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     # ── Upload ───────────────────────────────────────────
     max_upload_mb: int = Field(default=25, validation_alias="MAX_UPLOAD_MB")
 
+    # ── Templates ─────────────────────────────────────────
+    default_docx_template_path: str = Field(
+        default="data/sample_templates/Company_Proposal.docx",
+        validation_alias="DEFAULT_DOCX_TEMPLATE_PATH",
+    )
+    default_pptx_template_path: str = Field(
+        default="data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx",
+        validation_alias="DEFAULT_PPTX_TEMPLATE_PATH",
+    )
+
     # ── LLM ──────────────────────────────────────────────
     gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
     gemini_fallback_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_FALLBACK_MODEL")

@@ -31,4 +31,5 @@ class SlideModel(BaseModel):
 class DeckModel(BaseModel):
     """Root structured content model for presentation deck generation."""
     title: str
+    subtitle: str = ""
     slides: list[SlideModel] = Field(default_factory=list)

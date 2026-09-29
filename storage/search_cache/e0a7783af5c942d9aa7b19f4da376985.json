@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Java 26: what\u2019s new? | SQLI",
+    "url": "https://www.sqli.com/int-en/insights/java-26",
+    "snippet": "Java 26 has been released on March 17, 2026, six months after Java 25, the latest LTS (Long-Term Support) version. This release includes 10 JEPs (Java Enhancement Proposals) that impact both the core foundations of the language and its performance.\n\nThe most notable updates include a stronger reflection API, the definitive removal of the Applet API, performance improvements, and support for HTTP/3.\n\nExplore our analysis.\n\n## Java 26: New Features\n\n### JEP 500: Prepare to Make Final Mean Final",
+    "published_date": null
+  },
+  {
+    "title": "What's New in Java 26: New Features, Changes, and What Comes Next | JRebel",
+    "url": "https://www.jrebel.com/blog/java-26",
+    "snippet": "Java Updates\n\nJava 26 is officially here. Scheduled for general availability on March 17, 2026, this release marks the first non-LTS (Long-Term Support) release since Java 25 \u2014 and it delivers ten new JEPs (JDK Enhancement Proposals) spanning language improvements, garbage collection upgrades, security enhancements, and more. [...] Back to top\n\n## Summary\n\nJava 26 is the latest short-term release of Java and includes ten JEPs, or Java Enhancement Proposals. Together, these JEPs enable:\n\n Faster startup times\n Better throughput\n Cleaner concurrent code\n Stronger security primitives\n\nJava 26 will be succeeded by Java 27 in September, 2026.\n\n### Start Coding Java Faster in Java 26 [...] > Java 26 was released on March 17, 2026. It is a short-term release version, and will receive support for six months.\n\nJava 26 succeeds Java 25, although that is still the currently supported Java LTS version. Short-term releases for Java come out every six months, while LTS releases come out every other year. As a part of its long-term support policy, Oracle offers quarterly bug fixes and version support for an extended duration for these Java LTS releases.",
+    "published_date": null
+  },
+  {
+    "title": "Java 26: Better Language, Better APIs, Better Runtime - Inside.java",
+    "url": "https://inside.java/2026/05/19/javaone-better-jdk26",
+    "snippet": "Primitive patterns and lazy constants\n Updated structured concurrency\n PEM encoding and HTTP/3 support\n New command-line options to enable deep reflection\n\nThere are plenty of features in the language, API, and runtime to discuss; whether new, improved, or finalized. Let's go over them.\n\nMake sure to check the JavaOne 2026 playlist.\n\nAbout This Site  |  OpenJDK Community  |  Download Java\n\n\u00a9 2026 Oracle Corporation and/or its affiliates\n\nOracle Logo [...] Java Cup\n\nInside Java\n\nNews and views from members of the Java team at Oracle\n\nNewscast  |  Podcast  |  JEP Caf\u00e9  |  Sip of Java\n\ndev.java  |  Newsletter  |  About\n\n# Java 26: Better Language, Better APIs, Better Runtime\n\nby Nicolai Parlog on May 19, 2026\n\nSince JavaOne 2025, JDK 25 was released, the latest version with long-term support. But Java never stands still; it's already time to ship JDK 26. This talk summarizes the most important changes between Java 21 and 25:",
+    "published_date": null
+  },
+  {
+    "title": "Oracle Launches Java 25 with AI Enhancements, 18 New Features | ORCL Stock News",
+    "url": "https://www.stocktitan.net/news/ORCL/oracle-releases-java-3n1qf5ru1a7e.html",
+    "snippet": "The features in the Java 25 release are a result of continuous collaboration between Oracle and other members of the global Java developer community via OpenJDK and the Java Community Process (JCP). For more details on the features in Java 25, please read the Java 25 technical blog. In addition, the latest Java innovations across the global community will be showcased at JavaOne 2026 in Redwood Shores, CA on March 17-19, 2026. Read more about JavaOne 2026 here and sign up for updates here. [...] Java 25 includes structured concurrency for parallel tasks, vector API for optimal computations, and primitive type enhancements that benefit AI inferencing applications.\n\n### When will JavaOne 2026 take place?\n\nJavaOne 2026 will take place in Redwood Shores, CA on March 17-19, 2026.\n\n### What security enhancements are included in Java 25? [...] Dev.java: The official portal for learning Java\n Inside.java: News and views from the members of the Java Team at Oracle\n Java YouTube: The official Java YouTube channel for Java learning videos\n\nAdditional Resources\n\n Download Oracle JDK 25\n Read the Java 25 technical blog\n Learn more about JavaOne 2026 and sign up for updates\n Watch the Java 25 livestream\n Learn more about the Oracle Java SE Universal Subscription\n Learn more about the Java Management Service",
+    "published_date": null
+  }
+]

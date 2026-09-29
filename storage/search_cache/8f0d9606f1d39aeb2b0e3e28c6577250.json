@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Transformer Architecture: Components, Working & Applications",
+    "url": "https://talent500.com/blog/transformer-architecture",
+    "snippet": "Skip to content\n\n\n\n# Transformer Architecture: Components, Working & Applications\n\n Kashif Khan\n\n#### Jump to\n\n## Key Summary :\n\nTransformer architecture has become one of the most important foundations of modern artificial intelligence. It powers many of the language models, translation systems, image models, and multimodal AI applications used today. [...] Transformer architecture is a deep learning architecture that uses attention mechanisms to process relationships between elements in sequential or structured data. It was originally developed for sequence-to-sequence tasks in natural language processing and has since become widely used across AI.\n\n### How does Transformer architecture work? [...] Unlike earlier sequence-processing approaches that relied heavily on recurrent neural networks, Transformers can process relationships between tokens using attention mechanisms. This allows the architecture to capture connections between words or other elements of a sequence, even when those elements are far apart.\n\nUnderstanding transformer architecture is therefore important for anyone learning artificial intelligence, natural language processing, deep learning, or large language models.",
+    "published_date": null
+  },
+  {
+    "title": "Overview of the Transformer Architecture",
+    "url": "https://blog.paperspace.com/learning-in-latent-spaces-improves-the-predictive-accuracy-of-deep-neural-operators",
+    "snippet": "In the Transformer design, the event horizon, singularity, and mass are all crucial components. Since its inception in 2017, the Transformer design has undergone several iterations and split off into numerous versions, allowing it to be used to applications outside of language processing, such as time series forecasting, protein structure prediction, and source code synthesis. The Transformer architecture is effective because to its ability to process and train more data in less time, its [...] Add speed and simplicity to your Machine Learning workflow today\n\nGet startedTalk to an expert\n\n## Reference :\n\nA Comprehensive Survey on Applications of Transformers for Deep Learning Tasks\n\nTransformer is a deep neural network that employs a self-attention mechanismto comprehend the contextual relationships within sequential data. Unlikeconventional neural networks or updated versions of Recurrent Neural Networks(RNNs) such as Long Short-Term Memory (LSTM), transformer models excel\u2026 [...] The decoder module in the transformer architecture functions in a manner that is similar to that of the encoder module, but with the addition of several extra layers, such as Masked Multi-Head Attention. The decoder includes Masked Multi-Head Attention layers in addition to the Feed-Forward, Multi-Head Attention, Residual connection, and Add and Norm layers .",
+    "published_date": null
+  },
+  {
+    "title": "Transformer (deep learning) - Wikipedia",
+    "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning)",
+    "snippet": "The original version of the transformer architecture was proposed in the 2017 paper \"Attention Is All You Need\" by researchers at Google.( The predecessors of transformers were developed as an improvement over previous architectures for machine translation,( but have found many applications since. They are used in large-scale natural language processing, computer vision (vision transformers), reinforcement learning,( learning, robotics,( and playing chess.( It has also led to the development of [...] machine translation\n   time series prediction\n   document summarization\n   document generation\n   named entity recognition (NER)(\n   writing computer code based on requirements expressed in natural language.\n   speech-to-text\n\nBeyond traditional NLP, the transformer architecture has had success in other applications, such as: [...] Raschka, Sebastian (2026-03-11). \"The Big LLM Architecture Comparison: From DeepSeek V3 to GLM-5: A Look At Modern LLM Architecture Design\". _Sebastian Raschka\u2019s AI Magazine_. Archived from the original on 2026-03-21. Retrieved 2026-03-25.",
+    "published_date": null
+  },
+  {
+    "title": "Demystifying Transformer Architecture in Large Language Models",
+    "url": "https://www.truefoundry.com/blog/transformer-architecture",
+    "snippet": "GPT-3.5 and GPT-4 by OpenAI are a landmark in large language models, demonstrating an uncanny ability to generate human-like text, answer questions, and even code. Its applications range from content creation to aiding in programming tasks, showcasing the vast potential of Transformers in various industries.\n\n## The Future of Transformers [...] The llm transformer architecture is a revolutionary neural network design that processes entire input sequences simultaneously. It leverages a self-attention mechanism to understand word context deeply, unlike older models. This enables large language models to efficiently comprehend and generate human-like text, powering advancements in machine translation and content creation across the US.\n\n### Do LLMs still use transformers? [...] A transformer in LLM is an AI architecture that processes entire sentences simultaneously. It uses a self-attention mechanism to understand word relationships and context deeply. This groundbreaking technology revolutionized how large language models learn and generate human-like text, crucial for advanced applications and efficient language understanding.\n\n### What architecture is an LLM built on?",
+    "published_date": null
+  },
+  {
+    "title": "9\u00a0 Transformers \u2013 6.390 - Intro to Machine Learning",
+    "url": "https://introml.mit.edu/notes/transformers.html",
+    "snippet": "Transformers are a very recent family of architectures that were originally introduced in the field of natural language processing (NLP) in 2017, as an approach to process and understand human language. Since then, they have revolutionized not only NLP but also other domains such as image processing and multi-modal generative AI. Their scalability and parallelizability have made them the backbone of large-scale foundation models, such as GPT, BERT, and Vision Transformers (ViT), powering many",
+    "published_date": null
+  }
+]

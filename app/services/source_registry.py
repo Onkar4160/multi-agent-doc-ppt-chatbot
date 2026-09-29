@@ -62,11 +62,15 @@ class SourceRegistry:
         source_id = self._next_id
         self._next_id += 1
 
+        import datetime
+        accessed_at = datetime.date.today().strftime("%B %Y")
         record = {
             "id": source_id,
             "kind": kind,
-            "title": title,
+            "title": title or url_or_path or f"Source {source_id}",
             "url": url_or_path,
+            "url_or_filename": url_or_path,
+            "accessed_at": accessed_at,
             "snippet": snippet,
             "score": score,
             "published_date": published_date,
@@ -87,6 +91,7 @@ class SourceRegistry:
                         "score": score,
                         "published_date": published_date,
                         "citation_id": source_id,
+                        "accessed_at": accessed_at,
                     }),
                 )
                 self._db_session.add(db_source)
@@ -101,13 +106,15 @@ class SourceRegistry:
         return self._sources.get(source_id)
 
     def export_sources(self) -> dict[int, dict[str, Any]]:
-        """Export sources map format {id: {"title": ..., "url": ..., "snippet": ...}} for renderers."""
+        """Export sources map format {id: {"title": ..., "url": ..., "url_or_filename": ..., "kind": ..., "accessed_at": ...}} for renderers."""
         return {
             sid: {
                 "id": s["id"],
                 "kind": s["kind"],
                 "title": s["title"],
                 "url": s["url"],
+                "url_or_filename": s.get("url_or_filename", s["url"]),
+                "accessed_at": s.get("accessed_at", ""),
                 "snippet": s["snippet"],
                 "score": s["score"],
                 "published_date": s["published_date"],

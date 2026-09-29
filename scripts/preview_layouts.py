@@ -1,4 +1,4 @@
-"""Diagnostic script: preview every layout in Company_Template.pptx, export to PDF/PNG, and analyze decoration scores."""
+"""Diagnostic script: preview every layout in Green Cream Simple Aesthetic Watercolor Presentation.pptx, export to PDF/PNG, and analyze decoration scores."""
 
 from __future__ import annotations
 
@@ -52,8 +52,8 @@ def convert_pptx_to_pdf(pptx_path: Path, pdf_path: Path) -> bool:
 
 
 def main() -> None:
-    """Preview all layouts in Company_Template.pptx and analyze layout design features."""
-    tmpl_path = Path("data/sample_templates/Company_Template.pptx")
+    """Preview all layouts in Green Cream Simple Aesthetic Watercolor Presentation.pptx and analyze layout design features."""
+    tmpl_path = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
     out_dir = Path("data/outputs/preview")
     layouts_png_dir = out_dir / "layouts"
     layouts_png_dir.mkdir(parents=True, exist_ok=True)
@@ -143,6 +143,50 @@ def main() -> None:
     print("=" * 90)
 
 
+def print_deck_layout_preview(pptx_path: Path | str) -> list[dict[str, Any]]:
+    """Print per-slide layout used and whether auto-decoration was applied for a generated deck."""
+    deck_path = Path(pptx_path)
+    if not deck_path.exists():
+        print(f"Error: Presentation deck not found at '{deck_path}'")
+        return []
+
+    prs = pptx.Presentation(deck_path)
+    slide_report = []
+
+    print("\n" + "=" * 96)
+    print(f"GENERATED DECK SLIDE-BY-SLIDE LAYOUT & AUTO-DECORATION REPORT")
+    print(f"File: {deck_path} ({len(prs.slides)} slides)")
+    print("=" * 96)
+    print(f"{'Slide':<6} | {'Title':<30} | {'Layout Name':<28} | {'Auto-Decorated?'}")
+    print("=" * 96)
+
+    for idx, slide in enumerate(prs.slides, start=1):
+        title = ""
+        if slide.shapes.title and slide.shapes.title.text:
+            title = " ".join(slide.shapes.title.text.split())
+        elif len(slide.shapes) > 0:
+            for s in slide.shapes:
+                if shape_has_text(s) and s.text_frame.text:
+                    title = " ".join(s.text_frame.text.split()[:5])
+                    break
+        title_disp = (title[:27] + "...") if len(title) > 30 else (title or "[Untitled]")
+
+        layout_name = slide.slide_layout.name
+        auto_dec = any(getattr(s, "name", "").startswith("AutoDecoration") for s in slide.shapes)
+        auto_dec_label = "YES (accent rule/corner)" if auto_dec else "No"
+
+        slide_report.append({
+            "slide": idx,
+            "title": title_disp,
+            "layout": layout_name,
+            "auto_decorated": auto_dec,
+        })
+        print(f"{idx:<6} | {title_disp:<30} | {layout_name[:28]:<28} | {auto_dec_label}")
+
+    print("=" * 96 + "\n")
+    return slide_report
+
+
 def shape_has_text(shape: Any) -> bool:
     try:
         return shape.has_text_frame
@@ -151,4 +195,12 @@ def shape_has_text(shape: Any) -> bool:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1].endswith(".pptx"):
+        print_deck_layout_preview(sys.argv[1])
+    else:
+        main()
+        # Also check and print layout report for most recent generated deck if available
+        output_pptxs = sorted(Path("data/outputs").glob("*.pptx"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if output_pptxs:
+            print_deck_layout_preview(output_pptxs[0])
+

@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo_edit")
 
 DEFAULT_DOCX_TEMPLATE = Path("data/sample_templates/Company_Proposal.docx")
-DEFAULT_PPTX_TEMPLATE = Path("data/sample_templates/Company_Template.pptx")
+DEFAULT_PPTX_TEMPLATE = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 
 
 def ensure_initial_artifacts(session) -> tuple[Artifact, Artifact]:

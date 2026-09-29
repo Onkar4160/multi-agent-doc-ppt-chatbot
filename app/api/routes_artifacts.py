@@ -36,9 +36,6 @@ from app.services.versioning import (
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
-DEFAULT_DOCX_TEMPLATE = Path("data/sample_templates/Company_Proposal.docx")
-DEFAULT_PPTX_TEMPLATE = Path("data/sample_templates/Company_Template.pptx")
-
 
 class GenerateArtifactRequest(BaseModel):
     """Payload for generating document and presentation artifacts."""
@@ -72,7 +69,7 @@ async def generate_artifact(
     # Handle DOCX generation
     if body.kind in ("docx", "both"):
         doc_path, doc_profile = await _resolve_template_path_and_profile(
-            db, body.doc_template_file_id, default_path=DEFAULT_DOCX_TEMPLATE, is_pptx=False
+            db, is_pptx=False
         )
 
         start_t = time.perf_counter()
@@ -122,7 +119,7 @@ async def generate_artifact(
     # Handle PPTX generation
     if body.kind in ("pptx", "both"):
         ppt_path, ppt_profile = await _resolve_template_path_and_profile(
-            db, body.ppt_template_file_id, default_path=DEFAULT_PPTX_TEMPLATE, is_pptx=True
+            db, is_pptx=True
         )
 
         start_t = time.perf_counter()
@@ -171,11 +168,19 @@ async def generate_artifact(
 
 @router.get("", response_model=list[dict])
 async def get_artifacts(
+    session_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """List all generated artifacts."""
-    artifacts = await list_artifacts(db)
+    """List all generated artifacts, optionally filtered by session_id."""
+    if session_id:
+        from app.models.chat import ChatSession
+        sess_stmt = select(ChatSession).where(ChatSession.session_id == session_id)
+        sess_res = await db.execute(sess_stmt)
+        if not sess_res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+    artifacts = await list_artifacts(db, session_id=session_id)
     output = []
     for a in artifacts:
         latest = await get_version(db, a.id)
@@ -183,6 +188,8 @@ async def get_artifacts(
             "id": a.id,
             "title": a.title,
             "artifact_type": a.artifact_type,
+            "session_id": a.session_id,
+            "run_id": a.run_id,
             "latest_version": latest.version_no if latest else 1,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         })
@@ -386,36 +393,34 @@ async def download_artifact_version(
 
 async def _resolve_template_path_and_profile(
     db: AsyncSession,
-    file_id: int | None,
-    default_path: Path,
     is_pptx: bool,
 ) -> tuple[Path, Any]:
-    """Resolve template disk path and TemplateProfile."""
-    if file_id is not None:
-        res = await db.execute(select(UploadedFile).where(UploadedFile.id == file_id))
-        f_row = res.scalar_one_or_none()
-        if f_row and Path(f_row.stored_path).exists():
-            tmpl_path = Path(f_row.stored_path)
-            # Try loading profile from DB
-            prof_res = await db.execute(
-                select(TemplateProfileRecord)
-                .where(TemplateProfileRecord.file_id == file_id)
-                .order_by(TemplateProfileRecord.id.desc())
-            )
-            p_rec = prof_res.scalar_one_or_none()
-            if p_rec:
-                from app.models.template_profile import TemplateProfile
-                profile = TemplateProfile.model_validate_json(p_rec.profile_json)
-                return tmpl_path, profile
-            else:
-                # Analyze on the fly
-                profile = analyze_presentation(tmpl_path, file_id) if is_pptx else analyze_document(tmpl_path, file_id)
-                return tmpl_path, profile
+    """Resolve template disk path and TemplateProfile from the active Workspace."""
+    from app.models.workspace import Workspace
 
-    # Fallback to default template
-    tmpl_path = default_path
-    if not tmpl_path.exists():
-        raise FileNotFoundError(f"Default template missing at '{default_path}'")
+    res = await db.execute(select(Workspace).where(Workspace.is_active == True))
+    active_ws = res.scalar_one_or_none()
+    if not active_ws:
+        raise RuntimeError("No active workspace found. An active workspace must be initialized at startup.")
 
-    profile = analyze_presentation(tmpl_path) if is_pptx else analyze_document(tmpl_path)
+    tmpl_file_id = active_ws.pptx_template_file_id if is_pptx else active_ws.docx_template_file_id
+    profile_json = active_ws.ppt_profile_json if is_pptx else active_ws.doc_profile_json
+
+    if not tmpl_file_id:
+        raise RuntimeError(f"Active workspace is missing {'PPTX' if is_pptx else 'DOCX'} template file ID.")
+
+    f_res = await db.execute(select(UploadedFile).where(UploadedFile.id == tmpl_file_id))
+    f_row = f_res.scalar_one_or_none()
+    if not f_row or not Path(f_row.stored_path).exists():
+        raise FileNotFoundError(
+            f"Active workspace template file missing on disk: {f_row.stored_path if f_row else 'None'}"
+        )
+
+    tmpl_path = Path(f_row.stored_path)
+    if profile_json:
+        from app.models.template_profile import TemplateProfile
+        profile = TemplateProfile.model_validate_json(profile_json)
+    else:
+        profile = analyze_presentation(tmpl_path, tmpl_file_id) if is_pptx else analyze_document(tmpl_path, tmpl_file_id)
+
     return tmpl_path, profile

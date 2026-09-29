@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import sys
 import time
 import warnings
@@ -94,8 +95,8 @@ class LLMClient:
             _warn_mock_mode()
             self._client = None
         else:
-            api_key = settings.gemini_api_key
-            if not api_key or api_key.strip() in ("", "EX", "mock-gemini-key", "MOCK_KEY"):
+            api_key = settings.gemini_api_key.strip() if settings.gemini_api_key else ""
+            if not api_key or api_key in ("", "EX", "mock-gemini-key", "MOCK_KEY"):
                 raise RuntimeError(
                     "GEMINI_API_KEY missing or placeholder. "
                     "Add a valid key to .env, or set MOCK_LLM=true for testing."
@@ -174,7 +175,7 @@ class LLMClient:
                 return schema.model_validate_json(cached)
 
         if self._mock_mode:
-            return self._mock_json_response(schema)
+            return self._mock_json_response(schema, prompt=prompt)
 
         raw = self._call_with_retry(
             prompt,
@@ -221,31 +222,62 @@ class LLMClient:
         logger.warning("[MOCK] Returning canned text response (prompt: %.60s…)", prompt)
         return "[MOCK] Canned response for testing purposes."
 
-    def _mock_json_response(self, schema: type[T]) -> T:
+    def _mock_json_response(self, schema: type[T], prompt: str = "") -> T:
         """Return a minimal valid instance of schema in mock mode."""
         self._stats.mock_calls += 1
         self._last_record = LLMCallRecord(
             model="[MOCK]", cache_hit=False, latency_ms=0.0, mock=True,
         )
         logger.warning("[MOCK] Returning canned JSON response for schema %s", schema.__name__)
+        s_name = schema.__name__
+        if s_name == "Plan":
+            msg_match = re.search(r'USER MESSAGE:\s*"(.*?)"', prompt, re.DOTALL)
+            msg_text = msg_match.group(1).lower() if msg_match else prompt.lower()
+            doc_type = "generic"
+            if "proposal" in msg_text or "pitch" in msg_text or "rfp" in msg_text:
+                doc_type = "proposal"
+            elif "report" in msg_text or "research" in msg_text or "development" in msg_text or "develop" in msg_text:
+                doc_type = "research_report"
+            elif "profile" in msg_text or "company" in msg_text:
+                doc_type = "company_profile"
+            elif "market" in msg_text or "competitor" in msg_text or "industry" in msg_text:
+                doc_type = "market_analysis"
+            return schema.model_validate({
+                "action": "generate",
+                "document_type": doc_type,
+                "outputs": ["docx", "pptx"],
+                "topic": "Sample Topic",
+                "slide_count": 12,
+            })
         try:
             return schema.model_validate({})
         except Exception:
-            s_name = schema.__name__
             if s_name == "DocumentModel":
-                return schema.model_validate({
-                    "title": "[MOCK] Sample Proposal Document",
-                    "subtitle": "Sample Engagement Architecture",
-                    "client_name": "Sample Enterprise Client",
-                    "date": "September 2026",
-                    "sections": [
+                p_lower = prompt.lower()
+                is_proposal = "document type: proposal" in p_lower or ("document type:" not in p_lower and "proposal" in p_lower)
+                if is_proposal:
+                    sections = [
                         {"heading": "1. Executive Summary", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample mock paragraph content with citation source.", "source_ids": [1]}]},
                         {"heading": "2. Problem Statement", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample problem statement.", "source_ids": [1]}]},
                         {"heading": "3. Proposed Solution", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample solution description.", "source_ids": [1]}]},
                         {"heading": "4. Methodology", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample methodology.", "source_ids": [1]}]},
                         {"heading": "5. Commercials & Timeline", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample commercials.", "source_ids": [1]}]},
                         {"heading": "6. Sources & References", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample references.", "source_ids": [1]}]},
-                    ],
+                    ]
+                else:
+                    sections = [
+                        {"heading": "1. Overview & Background", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample overview and background research.", "source_ids": [1]}]},
+                        {"heading": "2. Key Findings & Developments", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample key developments and findings.", "source_ids": [1]}]},
+                        {"heading": "3. In-Depth Analysis", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample in-depth technical analysis.", "source_ids": [1]}]},
+                        {"heading": "4. Strategic Implications & Impact", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample implications and future impact.", "source_ids": [1]}]},
+                        {"heading": "5. Sources & References", "level": 1, "blocks": [{"type": "paragraph", "text": "Sample research citations and references.", "source_ids": [1]}]},
+                    ]
+                return schema.model_validate({
+                    "title": "[MOCK] Sample Document",
+                    "subtitle": "Sample Engagement Architecture",
+                    "client_name": "Sample Enterprise Client",
+                    "date": "September 2026",
+                    "sections": sections,
                 })
             elif s_name == "DeckModel":
                 return schema.model_validate({
@@ -273,13 +305,6 @@ class LLMClient:
                         {"text": "72% of mid-size enterprises plan agentic workflow adoption.", "source_ids": [1]},
                         {"text": "Automated document creation reduces proposal SLA by 80%.", "source_ids": [1]},
                     ]
-                })
-            elif s_name == "Plan":
-                return schema.model_validate({
-                    "action": "generate",
-                    "outputs": ["docx", "pptx"],
-                    "topic": "Sample Topic",
-                    "slide_count": 12,
                 })
             elif s_name == "EditPlan":
                 return schema.model_validate({
@@ -317,7 +342,11 @@ class LLMClient:
         image_mime: str = "image/png",
     ) -> str:
         """Call Gemini with exponential backoff retry and model fallback."""
-        models = [self._primary, self._fallback]
+        candidate_models = [self._primary, self._fallback, "gemini-2.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
+        models: list[str] = []
+        for m in candidate_models:
+            if m and m not in models:
+                models.append(m)
 
         for model_name in models:
             for attempt in range(1, self._max_retries + 1):
@@ -346,8 +375,10 @@ class LLMClient:
                     return res
                 except Exception as exc:
                     err_str = str(exc)
-                    is_retryable = any(
-                        code in err_str for code in ("429", "500", "502", "503", "504")
+                    is_daily_quota = "generaterequestsperday" in err_str.lower() or "quota exceeded" in err_str.lower() and "perday" in err_str.lower()
+                    is_retryable = (
+                        any(code in err_str for code in ("429", "500", "502", "503", "504"))
+                        and not is_daily_quota
                     )
                     logger.warning(
                         "LLM call failed (model=%s attempt=%d/%d): %s",
@@ -360,10 +391,8 @@ class LLMClient:
                         wait = 2 ** attempt
                         logger.info("Retrying in %ds…", wait)
                         time.sleep(wait)
-                    elif not is_retryable:
-                        break  # non-retryable error -> try fallback model
                     else:
-                        break  # exhausted retries -> try fallback model
+                        break  # non-retryable error or daily quota exhausted -> try fallback model
 
             logger.info("Falling back from '%s' to next model…", model_name)
 

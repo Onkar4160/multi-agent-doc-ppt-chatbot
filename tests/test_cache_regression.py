@@ -9,7 +9,7 @@ from app.models.deck_model import DeckModel, SlideModel
 
 
 DOCX_TEMPLATE = Path("data/sample_templates/Company_Proposal.docx")
-PPTX_TEMPLATE = Path("data/sample_templates/Company_Template.pptx")
+PPTX_TEMPLATE = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 
 
 def test_cache_regression_no_name_error(tmp_path: Path):

@@ -624,7 +624,7 @@ def generate_sample_readme(readme_path: Path) -> None:
         "- **`Company_Proposal.docx`**: Styled AI consulting proposal template for NexaWorks AI Solutions (Pune). "
         "Includes custom cover block, typography, styled tables (Timeline & Pricing), team section, and header/footer. "
         "*Note: Executive Summary is omitted intentionally to demo dynamic generation.*[REQUIRED]\n"
-        "- **`Company_Template.pptx`**: Master corporate presentation template with slide masters, brand colors, "
+        "- **`Green Cream Simple Aesthetic Watercolor Presentation.pptx`**: Master corporate presentation template with slide masters, brand colors, "
         "and layouts for generating presentation decks.\n\n"
         "### 2. `data/sample_kb/`\n"
         "- **`company_overview.md`**: Markdown overview of NexaWorks AI Solutions (location, history, metrics).\n"
@@ -641,7 +641,7 @@ def generate_sample_readme(readme_path: Path) -> None:
 
 
 def check_pptx_template(pptx_path: Path) -> bool:
-    """Check if Company_Template.pptx exists without overwriting it."""
+    """Check if Green Cream Simple Aesthetic Watercolor Presentation.pptx exists without overwriting it."""
     if pptx_path.exists():
         print(f"[OK] Found existing PPTX template: {pptx_path} ({pptx_path.stat().st_size} bytes)")
         return True
@@ -649,7 +649,7 @@ def check_pptx_template(pptx_path: Path) -> bool:
         print(
             "\n" + "=" * 70 + "\n"
             f"[WARNING] '{pptx_path}' is MISSING!\n"
-            "Please place a valid corporate PowerPoint presentation template named 'Company_Template.pptx' "
+            "Please place a valid corporate PowerPoint presentation template named 'Green Cream Simple Aesthetic Watercolor Presentation.pptx' "
             "in 'data/sample_templates/' to enable PowerPoint deck generation demos.\n"
              + "=" * 70 + "\n"
         )
@@ -687,7 +687,7 @@ def main() -> None:
     generate_sample_readme(readme_path)
 
     # 5. Check PPTX Template
-    pptx_path = templates_dir / "Company_Template.pptx"
+    pptx_path = templates_dir / "Green Cream Simple Aesthetic Watercolor Presentation.pptx"
     pptx_exists = check_pptx_template(pptx_path)
 
     # Summary Table

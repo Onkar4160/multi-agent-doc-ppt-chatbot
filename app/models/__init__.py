@@ -9,6 +9,7 @@ from app.models.source import Source
 from app.models.template_profile import TemplateProfileRecord
 from app.models.trace import AgentTrace
 from app.models.user import User
+from app.models.workspace import Workspace
 
 __all__ = [
     "UploadedFile",
@@ -22,4 +23,6 @@ __all__ = [
     "Source",
     "TemplateProfileRecord",
     "User",
+    "Workspace",
 ]
+

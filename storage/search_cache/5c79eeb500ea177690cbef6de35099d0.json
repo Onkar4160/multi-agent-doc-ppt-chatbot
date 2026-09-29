@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Benchmarks Show Faster Java Performance Improvement - Azul | Better Java Performance, Superior Java Support",
+    "url": "https://www.azul.com/blog/benchmarks-show-faster-java-performance-improvement",
+    "snippet": "Forrester reports an 129% ROI by Optimizing Java Runtime Performance.\n\nCompany\n\nAccolades\n\nPartners\n\nGet our latest report\n\nRead the 2026 State of Java Survey & Report\n\n2026 State of Java Survey and Report\n\nInsights from over 2,000 global Java users reveal the 2026 Java trends that are powering the next era of innovation.\n\nAzul logo\n\n English\")\n\nJava Downloads   Speak to a Java Expert\n\nJava Runtimes\n\nJava Application Frameworks & Platforms\n\nJava Intelligence\n\nPricing [...] ### Beyond APM: How Java Intelligence Augments Production Monitoring\n\nKirk Tuxhorn / Jun 30, 2026    \n\nBlog\n\n### Your JVM Is an AWS Architecture Decision \u2013 Which Most Teams Miss\n\nDaniel Witkowski / Jun 22, 2026    \n\nCloud Costs\n\n### The Hidden Tax on Kubernetes Bin Packing\n\nAlex Berkoff / Jun 17, 2026 [...] 2026 State of Java Survey and Report\n\nInsights from over 2,000 global Java users reveal the 2026 Java trends that are powering the next era of innovation.\n\n# Benchmarks Show Faster Java Performance Improvement\n\nJava Application Performance Comparison: Azul Zing and OpenJDK\n\nKevin West\n\nOct 29, 2024\n\nContact Us east",
+    "published_date": null
+  },
+  {
+    "title": "Just-In-Time Compilation for Java Performance: Recent and Ongoing Improvements",
+    "url": "https://www.youtube.com/watch?v=h45cGYc6xP8",
+    "snippet": "### Description\n18,301 views\nPosted: 2026-09-20\nJust-in-time (JIT) compilation within the JVM is essential to Java's performance and plays a central role in ongoing OpenJDK projects such as Valhalla, Leyden, and Panama. JIT compilation is constantly evolving to support the evolution of the Java language, its main application areas, deployment models, and underlying hardware. [...] This talk provides an overview of recent performance improvements delivered by the JVM's JIT compilers, both as part of and in addition to OpenJDK projects, and highlights some of the most significant ongoing developments in this area.\n\nPresented by Roberto Casta\u00f1eda Lozano (Oracle) at JavaOne 2026 (CA, March 2026).\n\nAll    \u2022 JavaOne 2026   talks.\n\n\u2022    \u2022 JIT Compiler From the Ground Up [AtA] Insi...  \n\nTags: #Java #Performance #JavaOne #JVM \n\nLRN1390 18 AUDI [...] [6:34] So one thing I have done I have measured here the improvements of going from JDK 21 to JDK26 on a few benchmarks run on\n[6:44] x86 and here I try to isolate the improvements to the effect of the just in time compiler by running the JVM in a\n[6:52] configuration such that all VM components will not really have a big effect. So improvements for example in GC will not show up here. So this is a",
+    "published_date": null
+  },
+  {
+    "title": "Java 18 to 25 Benchmarks: How Performance Evolved Over Time",
+    "url": "https://www.repoflow.io/blog/java-18-to-25-benchmarks-how-performance-evolved-over-time",
+    "snippet": "RepoFlow\n\nRepoFlow Team \u00b7 Mar 10, 2026\n\n# Java 18 to 25 Benchmarks: How Performance Evolved Over Time\n\nSynthetic application and microbenchmark results for Eclipse Temurin Java 18 to 25\n\nAfter benchmarking version to version performance across a few runtimes (like Node.js and Python), we got a lot of requests to run Java next. [...] Ruby 2.7 to 4.0 Benchmarks: How Performance Evolved Over Time\n\nBenchmark\n\n### Ruby 2.7 to 4.0 Benchmarks: How Performance Evolved Over Time\n\nRepoFlow Team \u00b7 Aug 24, 2026\n\nGo 1.19 to 1.26 Benchmarks: How Performance Evolved Over Time\n\nBenchmark\n\n### Go 1.19 to 1.26 Benchmarks: How Performance Evolved Over Time\n\nRepoFlow Team \u00b7 Aug 10, 2026\n\nNode.js 24 vs 25 vs 26 Complete Benchmark\n\nBenchmark\n\n### Node.js 24 vs 25 vs 26 Complete Benchmark\n\nRepoFlow Team \u00b7 May 26, 2026\n\nRepoFlow Blog",
+    "published_date": null
+  },
+  {
+    "title": "Performance Improvements in JDK 26 - Inside.java",
+    "url": "https://inside.java/2026/06/09/jdk-26-performance-improvements",
+    "snippet": "By allowing waiting virtual threads to be preempted during common class-initialization paths, JDK 26 reduces unnecessary carrier blocking, improves scalability for applications with many virtual threads, and lowers the risk of throughput loss or carrier starvation during bursts of class loading or initialization.\n\n## Closing Thoughts\n\nJDK 26 has been generally available since March 2026, so now is a great time to try it with your own applications and workloads. [...] The JDK performance work continues as we see a healthy set of improvements taking shape for JDK 27, and we look forward to exploring those in more detail in a future update.\n\nUntil then\u2026 stay on the fast path!\n\nAbout This Site  |  OpenJDK Community  |  Download Java\n\n\u00a9 2026 Oracle Corporation and/or its affiliates\n\nOracle Logo [...] Java Cup\n\nInside Java\n\nNews and views from members of the Java team at Oracle\n\nNewscast  |  Podcast  |  JEP Caf\u00e9  |  Sip of Java\n\ndev.java  |  Newsletter  |  About\n\n# Performance Improvements in JDK 26\n\nby Ana-Maria Mihalceanu, Per-Ake Minborg on June 9, 2026",
+    "published_date": null
+  }
+]

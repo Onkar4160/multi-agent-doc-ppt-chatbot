@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,45 @@ from app.models.document_model import (
     BulletsBlock,
     DocumentModel,
     ParagraphBlock,
+    Section,
     TableBlock,
 )
 from app.models.template_profile import TemplateProfile
 
 logger = logging.getLogger(__name__)
+
+
+def strip_markdown(text: str) -> str:
+    """Strip stray markdown markers (**text** -> text, __text__ -> text, leading #'s removed)."""
+    if not text:
+        return ""
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"__(.*?)__", r"\1", text)
+    lines = [re.sub(r"^\s*#{1,6}\s*", "", line) for line in text.split("\n")]
+    return "\n".join(lines)
+
+
+def _is_block_empty(block: Any) -> bool:
+    """Check if a content block has zero content."""
+    if isinstance(block, ParagraphBlock):
+        return not bool(block.text and strip_markdown(block.text).strip())
+    elif isinstance(block, BulletsBlock):
+        return not bool(block.items and any(strip_markdown(item).strip() for item in block.items))
+    elif isinstance(block, TableBlock):
+        has_headers = bool(block.headers and any(strip_markdown(h).strip() for h in block.headers))
+        has_rows = bool(
+            block.rows
+            and any(any(strip_markdown(c).strip() for c in row) for row in block.rows)
+        )
+        return not (has_headers or has_rows)
+    return False
+
+
+def _is_section_empty(section: Section) -> bool:
+    """Check if a section has zero content (no non-empty blocks)."""
+    if not section.blocks:
+        return True
+    return all(_is_block_empty(b) for b in section.blocks)
 
 
 def render_docx(
@@ -67,35 +102,37 @@ def render_docx(
 
     # 3. Render Title & Cover Info
     if model.title:
+        clean_title = strip_markdown(model.title)
         p_title = doc.add_paragraph()
         p_title.paragraph_format.keep_with_next = True
         if "Title" in available_styles:
             p_title.style = "Title"
-            p_title.text = model.title
+            p_title.text = clean_title
         else:
             p_title.paragraph_format.space_before = Pt(24)
             p_title.paragraph_format.space_after = Pt(8)
-            run = p_title.add_run(model.title)
+            run = p_title.add_run(clean_title)
             run.font.size = Pt(22)
             run.bold = True
 
     if model.subtitle:
+        clean_sub = strip_markdown(model.subtitle)
         p_sub = doc.add_paragraph()
         p_sub.paragraph_format.keep_with_next = True
         if "Subtitle" in available_styles:
             p_sub.style = "Subtitle"
-            p_sub.text = model.subtitle
+            p_sub.text = clean_sub
         else:
             p_sub.paragraph_format.space_after = Pt(18)
-            run = p_sub.add_run(model.subtitle)
+            run = p_sub.add_run(clean_sub)
             run.font.size = Pt(13)
 
     if model.client_name or model.date:
         meta_lines = []
         if model.client_name:
-            meta_lines.append(f"PREPARED FOR: {model.client_name}")
+            meta_lines.append(f"PREPARED FOR: {strip_markdown(model.client_name)}")
         if model.date:
-            meta_lines.append(f"DATE: {model.date}")
+            meta_lines.append(f"DATE: {strip_markdown(model.date)}")
 
         p_meta = doc.add_paragraph()
         p_meta.paragraph_format.space_after = Pt(24)
@@ -104,17 +141,26 @@ def render_docx(
 
     # 4. Render Sections
     for section in model.sections:
+        if _is_section_empty(section):
+            logger.warning("Skipping empty section '%s' with zero content", section.heading)
+            continue
+
+        clean_heading = strip_markdown(section.heading)
         h_style = get_heading_style(section.level)
         p_h = doc.add_paragraph(style=h_style)
         p_h.paragraph_format.keep_with_next = True  # Prevent orphaned headings
-        p_h.add_run(section.heading)
+        p_h.add_run(clean_heading)
 
         for block in section.blocks:
+            if _is_block_empty(block):
+                logger.warning("Skipping empty block in section '%s'", section.heading)
+                continue
+
             if isinstance(block, ParagraphBlock):
                 p = doc.add_paragraph()
                 p.paragraph_format.line_spacing = 1.15
                 p.paragraph_format.space_after = Pt(6)
-                p.add_run(block.text)
+                p.add_run(strip_markdown(block.text))
 
                 if block.source_ids:
                     c_str = format_citations(block.source_ids)
@@ -126,12 +172,15 @@ def render_docx(
             elif isinstance(block, BulletsBlock):
                 style_name = "List Number" if block.ordered else ("List Bullet" if "List Bullet" in available_styles else "Normal")
                 for item in block.items:
+                    clean_item = strip_markdown(item)
+                    if not clean_item.strip():
+                        continue
                     p_b = doc.add_paragraph(style=style_name)
                     p_b.paragraph_format.line_spacing = 1.15
                     p_b.paragraph_format.space_after = Pt(4)
                     if not block.ordered and "List Bullet" not in available_styles:
                         p_b.add_run("• ")
-                    p_b.add_run(item)
+                    p_b.add_run(clean_item)
 
                 if block.source_ids:
                     all_referenced_source_ids.update(block.source_ids)
@@ -157,7 +206,7 @@ def render_docx(
                     if block.headers:
                         for col_idx, text in enumerate(block.headers):
                             cell = table.cell(0, col_idx)
-                            cell.text = text
+                            cell.text = strip_markdown(text)
                             _set_header_cell_style(cell)
                         curr_r = 1
 
@@ -165,7 +214,7 @@ def render_docx(
                         for col_idx, text in enumerate(row_data):
                             if col_idx < total_cols:
                                 cell = table.cell(curr_r + row_idx, col_idx)
-                                cell.text = text
+                                cell.text = strip_markdown(text)
                                 _set_body_cell_style(cell, is_alt=(row_idx % 2 == 1))
 
                     doc.add_paragraph().paragraph_format.space_after = Pt(8)
@@ -173,30 +222,37 @@ def render_docx(
                 if block.source_ids:
                     all_referenced_source_ids.update(block.source_ids)
 
-    # 5. Render Sources Section if citations exist
-    if all_referenced_source_ids or sources_map:
+    # 5. Render Sources Section if citations exist in the body
+    if all_referenced_source_ids:
         doc.add_paragraph().paragraph_format.space_after = Pt(18)
         p_src_h = doc.add_paragraph(style=get_heading_style(1))
         p_src_h.paragraph_format.keep_with_next = True  # Prevent orphaned Sources heading
         p_src_h.add_run("Sources & References")
 
-        ref_ids = sorted(list(all_referenced_source_ids)) if all_referenced_source_ids else (sorted(list(sources_map.keys())) if sources_map else [])
+        ref_ids = sorted(list(all_referenced_source_ids))
 
         for sid in ref_ids:
-            s_info = (sources_map or {}).get(sid, {})
-            title = s_info.get("title") or f"Source {sid}"
-            url = s_info.get("url") or ""
-            snippet = s_info.get("snippet") or ""
+            s_info = (sources_map or {}).get(sid) or (sources_map or {}).get(str(sid)) or {}
+            kind = s_info.get("kind", "web")
+            title = s_info.get("title", "")
+            url_or_fn = s_info.get("url_or_filename") or s_info.get("url", "")
+            accessed = s_info.get("accessed_at", "")
 
             p_src = doc.add_paragraph(style="List Bullet" if "List Bullet" in available_styles else "Normal")
             r_id = p_src.add_run(f"[{sid}] ")
             r_id.bold = True
-            p_src.add_run(f"{title} ")
-            if url:
-                r_u = p_src.add_run(f"({url}) ")
-                r_u.font.italic = True
-            if snippet:
-                p_src.add_run(f"— \"{snippet[:150]}...\"" if len(snippet) > 150 else f"— \"{snippet}\"")
+
+            if kind == "kb":
+                text = f"{title} - {url_or_fn}" if (title and url_or_fn and title != url_or_fn) else (title or url_or_fn or f"Document {sid}")
+            else:
+                acc_str = f" (accessed {accessed})" if accessed else ""
+                if title and url_or_fn:
+                    text = f"{title} - {url_or_fn}{acc_str}"
+                elif url_or_fn:
+                    text = f"{url_or_fn}{acc_str}"
+                else:
+                    text = f"{title}{acc_str}"
+            p_src.add_run(text)
 
     doc.save(destination)
     logger.info("Successfully rendered DOCX to %s", destination)

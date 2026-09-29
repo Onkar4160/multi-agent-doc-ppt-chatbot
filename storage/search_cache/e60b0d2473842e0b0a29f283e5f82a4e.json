@@ -1,0 +1,32 @@
+[
+  {
+    "title": "What comes after transformers? \u2013 A selective survey connecting ideas in deep learning",
+    "url": "https://arxiv.org/html/2408.00386v1",
+    "snippet": "This paper is driven by the goal of examining the recent advancements in deep learning from an more encompassing perspective, rather than concentrating on a specific specialized field. We contend that such an approach is crucial, especially as significant new developments have decelerated; currently, the vast majority of models employs the \u201cold\u201d but still mostly state-of-the art transformer architecture presented already in 2017. [...] Our findings suggest that despite many small and creative innovations since the original transformer architecture, there have not been any significant \"breakthrough\" discoveries that have led to much better leaderboard results. The improvements on models such as large language models within the last few years have been characterized by the enlargement of existing networks such as GPT, the increase of data volume (and quality), focus on computational efficiency, and a shift towards [...] models but also including far-out ideas in deep learning that seem promising despite not achieving state-of-the-art results. We also cover a discussion on recent state-of-the-art models such as OpenAI\u2019s GPT series and Meta\u2019s LLama models and, Google\u2019s Gemini model family.",
+    "published_date": null
+  },
+  {
+    "title": "The Evolution of Transformer Architecture: From 2017 to 2024",
+    "url": "https://medium.com/@arghya05/the-evolution-of-transformer-architecture-from-2017-to-2024-5a967488e63b",
+    "snippet": "Moreover, as hardware accelerators like GPUs and TPUs continue to improve, we can expect new innovations in model architecture to fully leverage these advancements. The synergy between software and hardware optimization will undoubtedly push the boundaries of what Transformers can achieve. [...] Sitemap\n\nOpen in app\n\nSign up\n\nSign in\n\n, computer vision, and even multi-modal applications. Over the years, as Transformer-based models have matured, several optimizations and refinements have been introduced to improve their performance, efficiency, and scalability. The diagram above compares the original 2017 Transformer decoder block to a 2024-era Transformer decoder block, such as the one used in Llama 3. [...] Why These Changes MatterThe enhancements to the Transformer block are not just theoretical niceties; they address real-world challenges in scaling deep learning models:\n\n1. Improved Scalability:As model sizes scale into the hundreds of billions of parameters, optimizations like grouped-query attention and RMSNorm ensure that training and inference remain computationally feasible.",
+    "published_date": null
+  },
+  {
+    "title": "What Is a Transformer Model? | NVIDIA Blogs",
+    "url": "https://blogs.nvidia.com/blog/what-is-a-transformer-model",
+    "snippet": "With those and other advances, \u201ctransformer model training can be reduced from weeks to days\u201d said Huang at GTC.\n\nMoE Means More for Transformers\n\nLast year, Google researchers described the Switch Transformer, one of the first trillion-parameter models. It uses AI sparsity, a complex mixture-of experts (MoE) architecture and other advances to drive performance gains in language processing and up to 7x increases in pre-training speed.\n\nGoogle's Switch Transformer model [...] DeepMind, in London, advanced the understanding of proteins, the building blocks of life, using a transformer called AlphaFold2, described in a recent Nature article. It processed amino acid chains like text strings to set a new watermark for describing how proteins fold, work that could speed drug discovery. [...] First described in a 2017 paper from Google, transformers are among the newest and one of the most powerful classes of models invented to date. They\u2019re driving a wave of advances in machine learning some have dubbed transformer AI.",
+    "published_date": null
+  },
+  {
+    "title": "What is a Transformer Model? | IBM",
+    "url": "https://www.ibm.com/think/topics/transformer-model",
+    "snippet": "The transformer architecture was first described in the seminal 2017 paper \u201cAttention is All You Need\u201d by Vaswani and others, which is now considered a watershed moment in deep learning.  \n  \n Originally introduced as an evolution of the recurrent neural network (RNN)-based sequence-to-sequence models used for machine translation, transformer-based models have since attained cutting-edge advancements across nearly every machine learning (ML)discipline.",
+    "published_date": null
+  },
+  {
+    "title": "Beyond LLMs: A Post-Transformer World Emerges \u2013 Communications of the ACM",
+    "url": "https://cacm.acm.org/news/beyond-llms-a-post-transformer-world-emerges",
+    "snippet": "Google DeepMind is developing Titans, a \u201cneural memory\u201d module that continues to learn and remember post-training. DeepMind researchers have also developed a technique called Nested Learning, which reorients internal workflows to avoid catastrophic forgetting. Meanwhile, AI21 Labs has developed Jamba, a model that combines transformer elements with Mamba-style state spaces, while another group of researchers has created a framework called Retentive Network, which takes aim at parallel training [...] For now, a post-transformer world is still taking shape\u2014and it isn\u2019t clear when it will fully arrive or what form it will take. Some researchers, such as CMU\u2019s Raghunathan, expect the space to advance gradually. She believes that model designers will mix and match components to achieve desired performance benchmarks, build more flexible frameworks, and produce more grounded results. This will lead to \u201ccreative and open-ended problem solving\u201d as well as \u201cimproved quality and reliability,\u201d she [...] Other post-transformer approaches are taking shape. For instance, researchers are exploring State Space Models (SSMs), such as Mamba, which maintain a compact running \u201cstate\u201d that\u2019s updated as new words or data arrive rather than constantly comparing every single word. It can process longer sequences\u2014and at times use less compute power and memory\u2014than current transformer models. SSMs could help AI better predict complex trajectories, weather patterns, and other dynamic events.",
+    "published_date": null
+  }
+]

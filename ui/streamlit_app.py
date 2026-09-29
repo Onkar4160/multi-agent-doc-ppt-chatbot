@@ -68,6 +68,9 @@ def _init_state() -> None:
         "use_kb": True,
         "uploaded_files": [],  # list of file dicts from backend
         "selected_file_ids": [],
+        "request_in_flight": False,
+        "last_submission_text": "",
+        "last_submission_time": 0.0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -148,6 +151,11 @@ def _do_login(username: str, password: str) -> bool:
         if r.status_code == 200:
             st.session_state.jwt = r.json()["access_token"]
             st.session_state.username = username
+            st.session_state.session_id = None
+            st.session_state.chat_history = []
+            st.session_state.selected_run_id = None
+            if "session" in st.query_params:
+                del st.query_params["session"]
             return True
         try:
             detail = r.json().get("detail", r.text)
@@ -183,6 +191,19 @@ if not st.session_state.jwt:
     st.stop()
 
 
+
+# Restore session from URL query_params on page load / F5
+if st.session_state.jwt and st.session_state.session_id is None:
+    url_sess = st.query_params.get("session")
+    if url_sess:
+        msgs = _get(f"/sessions/{url_sess}/messages")
+        if msgs is not None:
+            st.session_state.session_id = url_sess
+            st.session_state.chat_history = [
+                {"role": m["role"], "content": m["content"], "run_id": m.get("run_id")}
+                for m in msgs
+            ]
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
@@ -193,77 +214,28 @@ with st.sidebar:
         st.session_state.session_id = None
         st.session_state.chat_history = []
         st.session_state.selected_run_id = None
+        if "session" in st.query_params:
+            del st.query_params["session"]
         st.rerun()
 
     st.divider()
 
-    # ── (a) File upload ───────────────────────────────────────────────────────
-    st.subheader("📁 Templates & Reference Files")
-    uploaded = st.file_uploader(
-        "Upload (docx, pptx, pdf, png, jpg)",
-        type=ALLOWED_UPLOAD_TYPES,
-        label_visibility="collapsed",
-    )
-    if uploaded:
-        with st.spinner("Uploading…"):
-            res = _post(
-                "/files/upload",
-                files={"file": (uploaded.name, uploaded.getvalue(), uploaded.type)},
-            )
-        if res:
-            st.success(f"Uploaded: {res['filename']}")
-            # Auto-analyze
-            with st.spinner("Analyzing…"):
-                _post(f"/files/{res['id']}/analyze")
-            st.toast("✅ Analyzed", icon="✅")
+    # ── (a) Templates ─────────────────────────────────────────────────────────
+    workspaces = _get("/workspaces") or []
+    active_ws = next((w for w in workspaces if w.get("is_active")), None)
 
-    # List uploaded files
-    files_data = _get("/files") or []
-    st.session_state.uploaded_files = files_data
+    docx_name = active_ws.get("docx_filename") if active_ws else None
+    pptx_name = active_ws.get("pptx_filename") if active_ws else None
+    if not docx_name or not pptx_name:
+        docx_name = "Company_Proposal.docx"
+        pptx_name = "Green Cream Simple Aesthetic Watercolor Presentation.pptx"
 
-    # Hide files that fail analysis
-    analyzed_files = [f for f in files_data if f.get("analyzed") is True]
+    st.caption(f"Templates: {docx_name} / {pptx_name}")
 
-    # Show each name once (newest first)
-    seen_names: set[str] = set()
-    unique_files: list[dict] = []
-    for f in analyzed_files:
-        fn = f.get("filename", "")
-        if fn and fn not in seen_names:
-            seen_names.add(fn)
-            unique_files.append(f)
-
-    docx_files = [f for f in unique_files if f.get("file_type") == "docx"]
-    pptx_files = [f for f in unique_files if f.get("file_type") == "pptx"]
-
-    selected_ids: list[int] = []
-
-    # Two radio selectors: "DOCX template" and "PPTX template" (newest is default)
-    if docx_files:
-        docx_options = [f["filename"] for f in docx_files] + ["(None)"]
-        selected_docx = st.radio("DOCX template", docx_options, index=0)
-        if selected_docx and selected_docx != "(None)":
-            for f in docx_files:
-                if f["filename"] == selected_docx:
-                    selected_ids.append(f["id"])
-                    break
-    else:
-        st.caption("No analyzed DOCX templates")
-
-    if pptx_files:
-        pptx_options = [f["filename"] for f in pptx_files] + ["(None)"]
-        selected_pptx = st.radio("PPTX template", pptx_options, index=0)
-        if selected_pptx and selected_pptx != "(None)":
-            for f in pptx_files:
-                if f["filename"] == selected_pptx:
-                    selected_ids.append(f["id"])
-                    break
-    else:
-        st.caption("No analyzed PPTX templates")
-
-    st.session_state.selected_file_ids = selected_ids
+    st.session_state.selected_file_ids = []
 
     st.divider()
+
 
     # ── (b) Knowledge base ────────────────────────────────────────────────────
     st.subheader("🧠 Knowledge Base")
@@ -356,55 +328,79 @@ def _poll_run(run_id: str) -> dict | None:
 
 def _send_message(message: str) -> None:
     """Submit message to POST /chat, poll, render result."""
-    st.session_state.chat_history.append({"role": "user", "content": message})
+    msg_clean = message.strip()
+    now = time.time()
+    last_text = st.session_state.get("last_submission_text", "")
+    last_time = st.session_state.get("last_submission_time", 0.0)
 
-    payload: dict[str, Any] = {
-        "message": message,
-        "file_ids": st.session_state.selected_file_ids,
-    }
-    if st.session_state.session_id:
-        payload["session_id"] = st.session_state.session_id
-
-    with st.spinner("Submitting…"):
-        resp = _post("/chat", json=payload)
-
-    if not resp:
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": "❌ Failed to submit message to backend.",
-            "failed": True,
-        })
+    # Ignore identical resubmission within 5 seconds
+    if msg_clean and msg_clean == last_text and (now - last_time) < 5.0:
+        st.warning("⚠️ Duplicate request ignored (identical message sent within 5 seconds).")
         return
 
-    run_id = resp["run_id"]
-    st.session_state.session_id = resp.get("session_id", st.session_state.session_id)
-    st.session_state.selected_run_id = run_id
+    if st.session_state.get("request_in_flight", False):
+        st.warning("⚠️ A request is already in flight. Please wait for it to complete.")
+        return
 
-    run = _poll_run(run_id)
+    st.session_state.request_in_flight = True
+    st.session_state.last_submission_text = msg_clean
+    st.session_state.last_submission_time = now
 
-    if not run:
-        st.session_state.chat_history.append({
+    try:
+        st.session_state.chat_history.append({"role": "user", "content": message})
+
+        payload: dict[str, Any] = {
+            "message": message,
+            "file_ids": st.session_state.selected_file_ids,
+        }
+        if st.session_state.session_id:
+            payload["session_id"] = st.session_state.session_id
+
+        with st.spinner("Submitting…"):
+            resp = _post("/chat", json=payload)
+
+        if not resp:
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": "❌ Failed to submit message to backend.",
+                "failed": True,
+            })
+            return
+
+        run_id = resp["run_id"]
+        sess_id = resp.get("session_id", st.session_state.session_id)
+        st.session_state.session_id = sess_id
+        if sess_id:
+            st.query_params["session"] = sess_id
+        st.session_state.selected_run_id = run_id
+
+        run = _poll_run(run_id)
+
+        if not run:
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": "❌ Run did not return a result.",
+                "failed": True,
+                "run_id": run_id,
+            })
+            return
+
+        failed = run.get("status") == "failed"
+        errors = run.get("errors", [])
+
+        entry: dict[str, Any] = {
             "role": "assistant",
-            "content": "❌ Run did not return a result.",
-            "failed": True,
+            "content": run.get("reply") or ("❌ Pipeline failed – no reply." if failed else ""),
             "run_id": run_id,
-        })
-        return
-
-    failed = run.get("status") == "failed"
-    errors = run.get("errors", [])
-
-    entry: dict[str, Any] = {
-        "role": "assistant",
-        "content": run.get("reply") or ("❌ Pipeline failed – no reply." if failed else ""),
-        "run_id": run_id,
-        "citations": run.get("citations", {}),
-        "validation": run.get("validation_report"),
-        "artifacts": run.get("artifacts", []),
-        "errors": errors,
-        "failed": failed or bool(errors),
-    }
-    st.session_state.chat_history.append(entry)
+            "citations": run.get("citations", {}),
+            "validation": run.get("validation_report"),
+            "artifacts": run.get("artifacts", []),
+            "errors": errors,
+            "failed": failed or bool(errors),
+        }
+        st.session_state.chat_history.append(entry)
+    finally:
+        st.session_state.request_in_flight = False
 
 
 def _render_assistant_message(entry: dict) -> None:
@@ -485,18 +481,19 @@ with main_col:
                 _render_assistant_message(entry)
 
     # ── (4) Quick-action buttons ──────────────────────────────────────────────
+    in_flight = bool(st.session_state.get("request_in_flight", False))
     st.markdown("**Quick actions:**")
     btn_cols = st.columns(len(QUICK_ACTIONS))
     for col, action in zip(btn_cols, QUICK_ACTIONS):
         with col:
-            if st.button(action, key=f"qa_{action[:20]}", use_container_width=True):
+            if st.button(action, key=f"qa_{action[:20]}", use_container_width=True, disabled=in_flight):
                 _send_message(action)
                 st.rerun()
 
     st.divider()
 
     # ── (3) Chat input ────────────────────────────────────────────────────────
-    user_input = st.chat_input("Ask the AI assistant…")
+    user_input = st.chat_input("Ask the AI assistant…", disabled=in_flight)
     if user_input:
         _send_message(user_input)
         st.rerun()
@@ -516,10 +513,14 @@ with art_col:
         if st.button("🔄 Refresh", key="refresh_arts"):
             st.rerun()
 
-        artifacts_list = _get("/artifacts") or []
+        curr_sess = st.session_state.session_id
+        if curr_sess:
+            artifacts_list = _get(f"/sessions/{curr_sess}/artifacts") or []
+        else:
+            artifacts_list = []
 
         if not artifacts_list:
-            st.info("No artifacts yet. Start a chat to generate documents.")
+            st.info("No artifacts yet in this session. Start a chat to generate documents.")
         else:
             for art in artifacts_list:
                 art_id = art["id"]
@@ -528,6 +529,7 @@ with art_col:
                     continue
                 kind = art.get("artifact_type", "?")
                 latest_v = art.get("latest_version", 1)
+                versions = art.get("versions", [])
 
                 label = f"{kind.upper()} | {title} (v{latest_v})"
                 with st.expander(label, expanded=False):
@@ -535,7 +537,7 @@ with art_col:
                     dl_url = f"{API_BASE}/artifacts/{art_id}/download?version={latest_v}"
                     dcol1, dcol2 = st.columns(2)
                     with dcol1:
-                        st.markdown(f"[⬇️ Download {kind.upper()}]({dl_url})", unsafe_allow_html=False)
+                        st.markdown(f"[⬇️ Download Latest ({kind.upper()})]({dl_url})", unsafe_allow_html=False)
 
                     # Outline preview
                     ver_detail = _get(f"/artifacts/{art_id}/versions/{latest_v}")
@@ -552,11 +554,10 @@ with art_col:
                                 for idx, sl in enumerate(slides, 1):
                                     st.markdown(f"**{idx}.** {sl.get('title', '')}")
 
-                    # Version history table
-                    versions = _get(f"/artifacts/{art_id}/versions") or []
+                    # Version history table grouped under this artifact
                     if versions:
-                        with st.expander("📜 Version history", expanded=False):
-                            for ver in versions:
+                        with st.expander(f"📜 All Versions ({len(versions)})", expanded=False):
+                            for ver in reversed(versions):
                                 vno = ver.get("version_no")
                                 summary = ver.get("change_summary", "–")
                                 created = (ver.get("created_at") or "")[:16]

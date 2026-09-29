@@ -45,6 +45,15 @@ def test_supervisor_plan_parsing():
     state_ans: GraphState = {"plan": {"action": "answer"}}
     assert route_intent(state_ans) == "answer_node"
 
+    # Topic-style question defaults to generate (docx & pptx)
+    p_topic = parse_plan("How the Gen AI is developed in Google company.")
+    assert p_topic.action == "generate"
+    assert "docx" in p_topic.outputs and "pptx" in p_topic.outputs
+
+    # Explicit quick-answer signal triggers answer action
+    p_quick = parse_plan("Just tell me quickly, no file needed, what's Google's AI strategy?")
+    assert p_quick.action == "answer"
+
 
 # 2. Validator Catching Each Issue Type
 def test_validator_issue_detection():
@@ -80,7 +89,7 @@ def test_validator_issue_detection():
     issue_msgs = [i.message for i in report.issues]
     assert any("Slide count mismatch" in msg for msg in issue_msgs)
     assert any("Placeholder text detected" in msg for msg in issue_msgs)
-    assert any("minimum 6 required" in msg for msg in issue_msgs)
+    assert any("unusually short" in msg or "sections" in msg for msg in issue_msgs)
 
 
 # 3. Validation Retry Triggering

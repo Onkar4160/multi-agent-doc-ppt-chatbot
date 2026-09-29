@@ -25,7 +25,7 @@ DEMO_PROMPT = (
     "using the same tone and style as the uploaded files."
 )
 SAMPLE_DOCX = Path("data/sample_templates/Company_Proposal.docx")
-SAMPLE_PPTX = Path("data/sample_templates/Company_Template.pptx")
+SAMPLE_PPTX = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 
 
 def main() -> None:

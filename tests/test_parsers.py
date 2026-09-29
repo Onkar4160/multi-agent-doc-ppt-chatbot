@@ -16,7 +16,7 @@ from app.services.parsers import (
 )
 
 SAMPLE_DOCX = Path("data/sample_templates/Company_Proposal.docx")
-SAMPLE_PPTX = Path("data/sample_templates/Company_Template.pptx")
+SAMPLE_PPTX = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
 SAMPLE_PDF = Path("data/sample_kb/case_studies.pdf")
 SAMPLE_SCAN = Path("data/sample_scans/scanned_page.png")
 
