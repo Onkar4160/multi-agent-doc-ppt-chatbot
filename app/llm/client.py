@@ -230,7 +230,7 @@ class LLMClient:
         )
         logger.warning("[MOCK] Returning canned JSON response for schema %s", schema.__name__)
         s_name = schema.__name__
-        if s_name == "Plan":
+        if s_name in ("Plan", "ExecutionPlan"):
             msg_match = re.search(r'USER MESSAGE:\s*"(.*?)"', prompt, re.DOTALL)
             msg_text = msg_match.group(1).lower() if msg_match else prompt.lower()
             doc_type = "generic"
@@ -243,6 +243,8 @@ class LLMClient:
             elif "market" in msg_text or "competitor" in msg_text or "industry" in msg_text:
                 doc_type = "market_analysis"
             return schema.model_validate({
+                "operation": "CREATE",
+                "artifact_types": ["DOCX", "PPTX"],
                 "action": "generate",
                 "document_type": doc_type,
                 "outputs": ["docx", "pptx"],
@@ -322,11 +324,24 @@ class LLMClient:
                     ],
                     "summary": "Mock edit plan operation",
                 })
+            elif s_name in ("ToneAndSummarySchema", "PptToneAndSummarySchema"):
+                return schema.model_validate({
+                    "formality": "formal",
+                    "voice": "authoritative",
+                    "person": "third_person",
+                    "avg_sentence_length": 15.0,
+                    "style_notes": ["Clear structure", "Professional phrasing"],
+                    "typical_openings": ["This proposal outlines", "Our approach"],
+                    "content_summary": "Professional enterprise document template for corporate proposals and reports.",
+                })
+
+
             dummy_data = {}
             for fname, ffield in schema.model_fields.items():
                 if ffield.is_required():
                     dummy_data[fname] = f"Mock {fname}"
             return schema.model_validate(dummy_data)
+
 
     # ── Internal helpers ─────────────────────────────────
 

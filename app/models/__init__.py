@@ -11,6 +11,15 @@ from app.models.trace import AgentTrace
 from app.models.user import User
 from app.models.workspace import Workspace
 
+from app.models.context import ConversationContext
+from app.models.execution_plan import (
+    ArtifactType,
+    ExecutionPlan,
+    OperationType,
+    Plan,
+    TemplateMode,
+)
+
 __all__ = [
     "UploadedFile",
     "Artifact",
@@ -24,5 +33,11 @@ __all__ = [
     "TemplateProfileRecord",
     "User",
     "Workspace",
+    "ExecutionPlan",
+    "Plan",
+    "OperationType",
+    "ArtifactType",
+    "TemplateMode",
+    "ConversationContext",
 ]
 

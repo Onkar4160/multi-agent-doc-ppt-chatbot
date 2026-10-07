@@ -54,25 +54,43 @@ def _chunk_sentences(sentences: list[str], max_chars: int = 200) -> list[str]:
 def build_evidence_pack(
     findings: list[Any] | None = None,
     kb_hits: list[dict[str, Any]] | None = None,
+    file_hits: list[dict[str, Any]] | None = None,
     start_id: int = 1,
-    max_items: int = 24,
-    max_per_source: int = 3,
+    max_items: int = 36,
+    max_per_source: int = 4,
 ) -> list[EvidenceItem]:
-    """Aggregate web findings (atomic) and KB hits (split heuristically) into an evidence pack.
-
-    Args:
-        findings: List of FindingItem or dicts from web research (used as-is).
-        kb_hits: List of raw KB chunk dicts (split into 1-2 sentence pieces, capped ~200 chars).
-        start_id: Starting integer ID for evidence items (default 1).
-        max_items: Maximum total evidence items (default 24).
-        max_per_source: Maximum items per source ID (default 3).
-
-    Returns:
-        List of EvidenceItem with sequential IDs.
-    """
+    """Aggregate web findings, KB hits, and attached file hits into an evidence pack."""
     evidence_items: list[EvidenceItem] = []
     curr_id = start_id
     source_counts: dict[int, int] = {}
+
+    # 1. Attached File Hits: extract chunks from user uploaded reference/source files
+    if file_hits:
+        for hit in file_hits:
+            if len(evidence_items) >= max_items:
+                break
+            sid = hit.get("source_id", 0) if isinstance(hit, dict) else getattr(hit, "source_id", 0)
+            if source_counts.get(sid, 0) >= max_per_source:
+                continue
+
+            raw_text = (
+                hit.get("text") or hit.get("content") or ""
+                if isinstance(hit, dict)
+                else getattr(hit, "text", "")
+            )
+            sentences = _split_into_sentences(raw_text)
+            pieces = _chunk_sentences(sentences, max_chars=200)
+            for piece in pieces:
+                if len(evidence_items) >= max_items:
+                    break
+                if source_counts.get(sid, 0) >= max_per_source:
+                    break
+                if piece:
+                    evidence_items.append(
+                        EvidenceItem(id=curr_id, text=piece, source_id=sid)
+                    )
+                    source_counts[sid] = source_counts.get(sid, 0) + 1
+                    curr_id += 1
 
     # 1. KB Hits: split raw chunks into 1-2 sentence pieces
     if kb_hits:

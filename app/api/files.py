@@ -20,12 +20,14 @@ from app.models.trace import AgentTrace
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-ALLOWED_EXTENSIONS = {".docx", ".pdf", ".pptx", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXTENSIONS = {".docx", ".pdf", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg"}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_file(
     file: UploadFile = File(...),
+    purpose: str = "REFERENCE",
+    session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -53,8 +55,8 @@ async def upload_file(
             detail=f"File size ({len(content)} bytes) exceeds maximum limit of {settings.max_upload_mb} MB",
         )
 
-    # Magic bytes check for zip files (.docx and .pptx)
-    if ext in {".docx", ".pptx"}:
+    # Magic bytes check for zip files (.docx, .pptx, and .xlsx)
+    if ext in {".docx", ".pptx", ".xlsx"}:
         if len(content) < 4 or not (content.startswith(b"PK\x03\x04") or content.startswith(b"PK\x05\x06")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,6 +86,8 @@ async def upload_file(
                             "file_type": existing.file_type,
                             "file_size": existing.file_size,
                             "stored_path": existing.stored_path,
+                            "session_id": existing.session_id,
+                            "purpose": existing.purpose or "REFERENCE",
                         }
                 except Exception:
                     pass
@@ -94,6 +98,8 @@ async def upload_file(
                     "file_type": existing.file_type,
                     "file_size": existing.file_size,
                     "stored_path": existing.stored_path,
+                    "session_id": existing.session_id,
+                    "purpose": existing.purpose or "REFERENCE",
                 }
 
     file_uuid = str(uuid.uuid4())
@@ -110,6 +116,8 @@ async def upload_file(
         file_type=clean_type,
         file_size=len(content),
         stored_path=str(saved_path),
+        session_id=session_id,
+        purpose=purpose.upper() if purpose else "REFERENCE",
     )
     db.add(uploaded_file)
     await db.flush()
@@ -120,16 +128,22 @@ async def upload_file(
         "file_type": uploaded_file.file_type,
         "file_size": uploaded_file.file_size,
         "stored_path": uploaded_file.stored_path,
+        "session_id": uploaded_file.session_id,
+        "purpose": uploaded_file.purpose,
     }
 
 
 @router.get("", response_model=list[dict])
 async def list_files(
+    session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """List all uploaded files."""
-    result = await db.execute(select(UploadedFile).order_by(UploadedFile.id.desc()))
+    """List all uploaded files, optionally filtered by session_id."""
+    stmt = select(UploadedFile)
+    if session_id:
+        stmt = stmt.where(UploadedFile.session_id == session_id)
+    result = await db.execute(stmt.order_by(UploadedFile.id.desc()))
     files = result.scalars().all()
 
     profile_result = await db.execute(select(TemplateProfileRecord.file_id).distinct())
@@ -142,6 +156,8 @@ async def list_files(
             "file_type": f.file_type,
             "file_size": f.file_size,
             "stored_path": f.stored_path,
+            "session_id": f.session_id,
+            "purpose": f.purpose or "REFERENCE",
             "created_at": f.created_at.isoformat() if f.created_at else None,
             "analyzed": f.id in analyzed_ids,
         }

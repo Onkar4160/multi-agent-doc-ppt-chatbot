@@ -25,7 +25,13 @@ async def create_artifact(
     run_id: str | None = None,
 ) -> Artifact:
     """Create a new top-level Artifact record."""
-    clean_type = "pptx" if kind.lower() == "pptx" else "docx"
+    kind_lower = kind.lower()
+    if kind_lower == "pptx":
+        clean_type = "pptx"
+    elif kind_lower == "xlsx":
+        clean_type = "xlsx"
+    else:
+        clean_type = "docx"
     artifact = Artifact(
         title=title,
         artifact_type=clean_type,

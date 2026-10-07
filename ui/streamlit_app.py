@@ -18,7 +18,7 @@ import streamlit as st
 API_BASE = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 POLL_INTERVAL = 2          # seconds between run-status polls
 MAX_POLL_ROUNDS = 120      # 4 minutes max
-ALLOWED_UPLOAD_TYPES = ["docx", "pptx", "pdf", "png", "jpg", "jpeg"]
+ALLOWED_UPLOAD_TYPES = ["docx", "pptx", "xlsx", "pdf", "png", "jpg", "jpeg"]
 
 QUICK_ACTIONS = [
     "Add an executive summary",
@@ -47,6 +47,7 @@ st.markdown(
     .badge-docx    { background:#1565c0; color:#fff; padding:1px 7px; border-radius:4px; font-size:0.75rem; }
     .badge-pptx    { background:#6a1b9a; color:#fff; padding:1px 7px; border-radius:4px; font-size:0.75rem; }
     .badge-pdf     { background:#b71c1c; color:#fff; padding:1px 7px; border-radius:4px; font-size:0.75rem; }
+    .badge-xlsx    { background:#1b5e20; color:#fff; padding:1px 7px; border-radius:4px; font-size:0.75rem; }
     .badge-img     { background:#2e7d32; color:#fff; padding:1px 7px; border-radius:4px; font-size:0.75rem; }
     .error-box     { background:#3e0000; border:1px solid #f44336; border-radius:6px;
                      padding:0.6rem 1rem; color:#ff8a80; margin-bottom:0.5rem; }
@@ -135,7 +136,7 @@ def _show_api_error(method: str, path: str, r: httpx.Response) -> None:
 
 
 def _type_badge(ft: str) -> str:
-    css = {"docx": "badge-docx", "pptx": "badge-pptx", "pdf": "badge-pdf"}.get(ft, "badge-img")
+    css = {"docx": "badge-docx", "pptx": "badge-pptx", "pdf": "badge-pdf", "xlsx": "badge-xlsx"}.get(ft.lower(), "badge-img")
     return f'<span class="{css}">{ft.upper()}</span>'
 
 
@@ -214,69 +215,27 @@ with st.sidebar:
         st.session_state.session_id = None
         st.session_state.chat_history = []
         st.session_state.selected_run_id = None
+        st.session_state.uploaded_files = []
+        st.session_state.selected_file_ids = []
+        st.session_state["_uploaded_file_keys"] = set()
         if "session" in st.query_params:
             del st.query_params["session"]
         st.rerun()
 
     st.divider()
 
-    # ── (a) Templates ─────────────────────────────────────────────────────────
-    workspaces = _get("/workspaces") or []
-    active_ws = next((w for w in workspaces if w.get("is_active")), None)
+    curr_sess = st.session_state.session_id
+    if curr_sess:
+        st.caption(f"Session ID: `{curr_sess[:12]}...`")
 
-    docx_name = active_ws.get("docx_filename") if active_ws else None
-    pptx_name = active_ws.get("pptx_filename") if active_ws else None
-    if not docx_name or not pptx_name:
-        docx_name = "Company_Proposal.docx"
-        pptx_name = "Green Cream Simple Aesthetic Watercolor Presentation.pptx"
-
-    st.caption(f"Templates: {docx_name} / {pptx_name}")
-
-    st.session_state.selected_file_ids = []
-
-    st.divider()
-
-
-    # ── (b) Knowledge base ────────────────────────────────────────────────────
-    st.subheader("🧠 Knowledge Base")
-    kb_file = st.file_uploader(
-        "Ingest a document into KB",
-        type=["docx", "pdf", "pptx", "txt"],
-        key="kb_upload",
-        label_visibility="collapsed",
-    )
-    if kb_file:
-        with st.spinner("Ingesting…"):
-            res_kb = _post(
-                "/kb/ingest",
-                files={"file": (kb_file.name, kb_file.getvalue(), kb_file.type)},
-            )
-        if res_kb:
-            st.success(f"Ingested: {res_kb.get('result', {}).get('chunks_count', '?')} chunks")
-
-    if st.button("📚 Ingest sample KB", use_container_width=True):
-        with st.spinner("Ingesting sample KB…"):
-            res_s = _post("/kb/ingest-samples")
-        if res_s:
-            st.success(f"Ingested {res_s.get('ingested_files', 0)} files, {res_s.get('total_chunks', 0)} chunks")
-
-    kb_stats = _get("/kb/stats")
-    if kb_stats:
-        total_vecs = kb_stats.get("total_vectors") or kb_stats.get("vector_count") or kb_stats.get("count", "–")
-        st.caption(f"📊 Vector count: **{total_vecs}**")
-
-    st.divider()
-
-    # ── (c) Toggles ───────────────────────────────────────────────────────────
-    st.subheader("⚙️ Settings")
-    st.session_state.use_web = st.toggle("🌐 Use web search", value=st.session_state.use_web)
-    st.session_state.use_kb = st.toggle("🧠 Use knowledge base", value=st.session_state.use_kb)
+    st.caption("AI-orchestrated document & slide generation. Simply prompt and attach files.")
 
     st.divider()
     if st.button("🚪 Logout", use_container_width=True):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -347,14 +306,25 @@ def _send_message(message: str) -> None:
     st.session_state.last_submission_time = now
 
     try:
-        st.session_state.chat_history.append({"role": "user", "content": message})
+        user_content = message
+        if st.session_state.uploaded_files:
+            file_names = [f.get("filename", "file") for f in st.session_state.uploaded_files]
+            chips = " ".join([f"`📎 {fn}`" for fn in file_names])
+            user_content = f"{chips}\n\n{message}"
+
+        st.session_state.chat_history.append({"role": "user", "content": user_content})
 
         payload: dict[str, Any] = {
             "message": message,
-            "file_ids": st.session_state.selected_file_ids,
+            "file_ids": list(st.session_state.selected_file_ids),
         }
         if st.session_state.session_id:
             payload["session_id"] = st.session_state.session_id
+
+        # Reset composer attachments for subsequent messages
+        st.session_state.uploaded_files = []
+        st.session_state.selected_file_ids = []
+        st.session_state["_uploaded_file_keys"] = set()
 
         with st.spinner("Submitting…"):
             resp = _post("/chat", json=payload)
@@ -490,13 +460,53 @@ with main_col:
                 _send_message(action)
                 st.rerun()
 
-    st.divider()
+    # ── (3) Chat Composer with + Attachments ──────────────────────────────────
+    # Show active attachments above input
+    if st.session_state.uploaded_files:
+        chips = " ".join([
+            f'<span style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.85rem; margin-right: 6px; display: inline-block;">📎 <b>{f.get("filename")}</b></span>'
+            for f in st.session_state.uploaded_files
+        ])
+        st.markdown(f'<div style="margin-bottom: 8px;">{chips}</div>', unsafe_allow_html=True)
+        if st.button("✕ Remove attachments", key="clear_composer_files", help="Clear all attached files"):
+            st.session_state.uploaded_files = []
+            st.session_state.selected_file_ids = []
+            st.session_state["_uploaded_file_keys"] = set()
+            st.rerun()
 
-    # ── (3) Chat input ────────────────────────────────────────────────────────
+    with st.expander("➕ Attach file(s) to prompt", expanded=bool(not st.session_state.uploaded_files)):
+        new_attachments = st.file_uploader(
+            "Attach template, research PDF, docx, pptx, xlsx, etc.",
+            type=ALLOWED_UPLOAD_TYPES,
+            accept_multiple_files=True,
+            key="composer_multi_uploader",
+            label_visibility="collapsed",
+            help="Files will be analyzed automatically by the intelligence layer to infer role (template vs source).",
+        )
+        if new_attachments:
+            uploaded_keys = st.session_state.get("_uploaded_file_keys", set())
+            for att in new_attachments:
+                file_key = f"{att.name}_{att.size}"
+                if file_key not in uploaded_keys:
+                    with st.spinner(f"Uploading {att.name}…"):
+                        file_bytes = att.getvalue()
+                        sess_param = f"?session_id={st.session_state.session_id}" if st.session_state.session_id else ""
+                        res_up = _post(
+                            f"/files/upload{sess_param}",
+                            files={"file": (att.name, file_bytes, att.type or "application/octet-stream")},
+                        )
+                        if res_up and "id" in res_up:
+                            st.session_state.uploaded_files.append(res_up)
+                            if res_up["id"] not in st.session_state.selected_file_ids:
+                                st.session_state.selected_file_ids.append(res_up["id"])
+                            uploaded_keys.add(file_key)
+            st.session_state["_uploaded_file_keys"] = uploaded_keys
+
     user_input = st.chat_input("Ask the AI assistant…", disabled=in_flight)
     if user_input:
         _send_message(user_input)
         st.rerun()
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

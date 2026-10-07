@@ -13,6 +13,7 @@ class GraphState(TypedDict, total=False):
     user_message: str
     file_ids: list[int]
     plan: dict[str, Any] | None
+    execution_plan: dict[str, Any] | None
     template_profiles: dict[str, Any]
     registry: dict[str, Any] | None
     findings: list[dict[str, Any]]

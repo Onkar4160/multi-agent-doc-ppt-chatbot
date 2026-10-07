@@ -16,6 +16,8 @@ class UploadedFile(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    file_type: Mapped[str] = mapped_column(String(20), nullable=False)  # docx, pdf, pptx, png, jpg, jpeg
+    file_type: Mapped[str] = mapped_column(String(20), nullable=False)  # docx, pdf, pptx, xlsx, png, jpg, jpeg
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     stored_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    purpose: Mapped[str | None] = mapped_column(String(50), nullable=True, default="REFERENCE")

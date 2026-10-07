@@ -339,8 +339,15 @@ def edit_artifact(
         db_session.query(Workspace).filter(Workspace.is_active == True).first()
     )
 
+    from app.services.artifact_nodes import ensure_node_ids
+    from app.services.target_resolver import resolve_target
+
     if art_type == "docx":
         old_model = DocumentModel.model_validate_json(old_model_json)
+        ensure_node_ids(old_model)
+        target_check = resolve_target(instruction, old_model)
+        if not target_check.is_valid and target_check.error_code == "INVALID_TARGET":
+            raise ValueError(f"Target validation failed: {target_check.error_message}")
         tmpl_path = None
         profile = None
         if active_ws:
@@ -363,6 +370,10 @@ def edit_artifact(
             profile = TemplateProfile(colors={"primary": "#000000"})
     else:
         old_model = DeckModel.model_validate_json(old_model_json)
+        ensure_node_ids(old_model)
+        target_check = resolve_target(instruction, old_model)
+        if not target_check.is_valid and target_check.error_code == "INVALID_TARGET":
+            raise ValueError(f"Target validation failed: {target_check.error_message}")
         tmpl_path = None
         profile = None
         if active_ws:
@@ -717,6 +728,7 @@ def edit_artifact(
     valid_sids_set = set(int(k) for k in standard_sources_map.keys())
 
     # 8. Compute Diff
+    ensure_node_ids(new_model)
     diff = diff_models(old_model, new_model)
 
     # 9. Render & Validate

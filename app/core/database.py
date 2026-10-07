@@ -83,6 +83,15 @@ def run_migrations_sync(connection) -> None:
             if "sources_json" not in cols_av:
                 connection.execute(text("ALTER TABLE artifact_versions ADD COLUMN sources_json TEXT"))
 
+        # Check uploaded_files table
+        res_uf = connection.execute(text("PRAGMA table_info(uploaded_files)"))
+        cols_uf = [row[1] for row in res_uf.fetchall()]
+        if cols_uf:
+            if "session_id" not in cols_uf:
+                connection.execute(text("ALTER TABLE uploaded_files ADD COLUMN session_id VARCHAR(100)"))
+            if "purpose" not in cols_uf:
+                connection.execute(text("ALTER TABLE uploaded_files ADD COLUMN purpose VARCHAR(50) DEFAULT 'REFERENCE'"))
+
         # Backfill sources_json for versions missing it
         try:
             import json

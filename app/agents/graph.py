@@ -128,6 +128,25 @@ def traced(agent_name: str) -> Callable:
 
 # ── Node Implementations ───────────────────────────────────────────────────
 
+@traced("load_context_node")
+def node_load_context(state: GraphState) -> GraphState:
+    """Load session context and history before planning."""
+    session_id = state.get("session_id", "")
+    if not state.get("session_context") and session_id:
+        db_sess = _get_sync_session()
+        if db_sess:
+            try:
+                state["session_context"] = build_session_context(session_id, db_sess)
+            except Exception as exc:
+                logger.warning(f"Failed to load session context: {exc}")
+            finally:
+                try:
+                    db_sess.close()
+                except Exception:
+                    pass
+    return state
+
+
 @traced("plan_node")
 def node_plan(state: GraphState) -> GraphState:
     """ONE LLM call to parse user message into a structured Plan with session context."""
@@ -136,8 +155,8 @@ def node_plan(state: GraphState) -> GraphState:
     session_id = state.get("session_id", "")
 
     db_sess = _get_sync_session()
-    session_ctx = None
-    if db_sess and session_id:
+    session_ctx = state.get("session_context")
+    if not session_ctx and db_sess and session_id:
         try:
             session_ctx = build_session_context(session_id, db_sess)
         except Exception as exc:
@@ -145,20 +164,50 @@ def node_plan(state: GraphState) -> GraphState:
 
     plan_obj = parse_plan(user_msg, file_ids=file_ids, session_context=session_ctx)
 
-    # Always resolve templates from the single active Workspace
+    # Resolve templates (Uploaded, Default, Existing, None)
     if db_sess:
         try:
             active_ws = (
                 db_sess.query(Workspace).filter(Workspace.is_active == True).first()
             )
-            if active_ws:
-                plan_obj.doc_template_file_id = active_ws.docx_template_file_id
-                plan_obj.ppt_template_file_id = active_ws.pptx_template_file_id
+            # Query attached files
+            uf_query = db_sess.query(UploadedFile)
+            if file_ids:
+                attached_files = uf_query.filter(UploadedFile.id.in_(file_ids)).all()
+            elif session_id:
+                attached_files = uf_query.filter(UploadedFile.session_id == session_id).all()
+            else:
+                attached_files = []
+
+            from app.services.template_resolution import resolve_templates
+            tmpl_res = resolve_templates(
+                template_mode=plan_obj.template_mode,
+                artifact_types=plan_obj.artifact_types,
+                file_ids=file_ids,
+                uploaded_files=attached_files,
+                active_workspace=active_ws,
+                user_instruction=user_msg,
+            )
+
+            if not tmpl_res.is_valid:
+                plan_obj.error = tmpl_res.error_code
+                state_errors = list(state.get("errors", []))
+                state_errors.append(f"{tmpl_res.error_code}: {tmpl_res.error_message}")
+                state["errors"] = state_errors
+                state["reply"] = f"⚠️ Template Error [{tmpl_res.error_code}]: {tmpl_res.error_message}"
+            else:
+                plan_obj.doc_template_file_id = tmpl_res.docx_template_file_id
+                plan_obj.ppt_template_file_id = tmpl_res.pptx_template_file_id
+                plan_obj.template_file_ids = [
+                    tid for tid in [tmpl_res.docx_template_file_id, tmpl_res.pptx_template_file_id] if tid
+                ]
             db_sess.close()
         except Exception as exc:
-            logger.warning(f"Failed to resolve active workspace template file IDs: {exc}")
+            logger.warning(f"Failed to resolve template files: {exc}")
 
-    state["plan"] = plan_obj.model_dump()
+    plan_dict = plan_obj.model_dump()
+    state["execution_plan"] = plan_dict
+    state["plan"] = plan_dict
     state["session_context"] = session_ctx
     state["retry_count"] = 0
     state["errors"] = list(state.get("errors", []))
@@ -168,12 +217,26 @@ def node_plan(state: GraphState) -> GraphState:
 
 @traced("stub_node")
 def node_stub(state: GraphState) -> GraphState:
-    """Stub node for unsupported actions ('edit' or 'convert')."""
+    """Stub node for unsupported actions or early error returns."""
     plan_data = state.get("plan", {})
+    err_code = plan_data.get("error")
+    if err_code == "TEMPLATE_FILE_REQUIRED":
+        state["reply"] = (
+            "⚠️ Template Required: You requested to create an artifact using an uploaded template, "
+            "but no template file was attached to the request. Please upload a template file first."
+        )
+        state["artifacts"] = []
+        return state
+    if err_code == "AMBIGUOUS_TEMPLATES":
+        state["reply"] = plan_data.get("reasoning") or "I found multiple candidate templates. Which one should I use?"
+        state["artifacts"] = []
+        return state
+
     action = plan_data.get("action", "edit")
     state["reply"] = f"The '{action}' feature is coming in the next step! Stay tuned."
     state["artifacts"] = []
     return state
+
 
 
 @traced("answer_node")
@@ -312,10 +375,11 @@ def node_answer(state: GraphState) -> GraphState:
         ctx_summary += "Recent Messages:\n" + "\n".join(f"- {m['role']}: {m['content'][:150]}" for m in recent_msgs[-3:]) + "\n"
 
     use_web = plan_data.get("use_web", True)
-    use_kb = plan_data.get("use_kb", True)
+    use_kb = plan_data.get("use_rag", plan_data.get("use_kb", True))
+    source_file_ids = plan_data.get("source_file_ids", [])
 
-    ctx = build_context(resolved_msg, use_web=use_web, use_kb=use_kb)
-    evidence_pack = ctx.evidence_pack or build_evidence_pack(ctx.findings, ctx.kb_hits)
+    ctx = build_context(resolved_msg, use_web=use_web, use_kb=use_kb, file_ids=source_file_ids)
+    evidence_pack = ctx.evidence_pack or build_evidence_pack(ctx.findings, ctx.kb_hits, file_hits=ctx.file_hits)
     evidence_text = format_evidence_pack(evidence_pack)
 
     prompt = (
@@ -365,36 +429,49 @@ def node_analyze_templates(state: GraphState) -> GraphState:
                 "No active workspace found. An active workspace must be initialized at startup."
             )
 
+        plan_data = state.get("plan", {})
+        doc_tid = plan_data.get("doc_template_file_id") or active_ws.docx_template_file_id
+        ppt_tid = plan_data.get("ppt_template_file_id") or active_ws.pptx_template_file_id
+
         doc_file = (
             db_sess.query(UploadedFile)
-            .filter(UploadedFile.id == active_ws.docx_template_file_id)
+            .filter(UploadedFile.id == doc_tid)
             .first()
         )
         ppt_file = (
             db_sess.query(UploadedFile)
-            .filter(UploadedFile.id == active_ws.pptx_template_file_id)
+            .filter(UploadedFile.id == ppt_tid)
             .first()
         )
+        if not doc_file:
+            doc_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.docx_template_file_id).first()
+        if not ppt_file:
+            ppt_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.pptx_template_file_id).first()
+
         if not doc_file or not Path(doc_file.stored_path).exists():
             raise FileNotFoundError(
-                f"Active workspace DOCX template file missing: {doc_file.stored_path if doc_file else 'None'}"
+                f"Active or uploaded DOCX template file missing: {doc_file.stored_path if doc_file else 'None'}"
             )
         if not ppt_file or not Path(ppt_file.stored_path).exists():
             raise FileNotFoundError(
-                f"Active workspace PPTX template file missing: {ppt_file.stored_path if ppt_file else 'None'}"
+                f"Active or uploaded PPTX template file missing: {ppt_file.stored_path if ppt_file else 'None'}"
             )
 
         doc_tmpl_path = Path(doc_file.stored_path)
         ppt_tmpl_path = Path(ppt_file.stored_path)
 
-        if active_ws.doc_profile_json:
+        if doc_file.id != active_ws.docx_template_file_id:
+            doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
+        elif active_ws.doc_profile_json:
             doc_profile = json.loads(active_ws.doc_profile_json)
         else:
             doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
             active_ws.doc_profile_json = json.dumps(doc_profile)
             db_sess.commit()
 
-        if active_ws.ppt_profile_json:
+        if ppt_file.id != active_ws.pptx_template_file_id:
+            ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
+        elif active_ws.ppt_profile_json:
             ppt_profile = json.loads(active_ws.ppt_profile_json)
         else:
             ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
@@ -418,9 +495,10 @@ def node_gather_context(state: GraphState) -> GraphState:
     plan_data = state.get("plan", {})
     topic = plan_data.get("topic") or state.get("user_message", "")
     use_web = plan_data.get("use_web", True)
-    use_kb = plan_data.get("use_kb", True)
+    use_kb = plan_data.get("use_rag", plan_data.get("use_kb", True))
+    source_file_ids = plan_data.get("source_file_ids", [])
 
-    ctx = build_context(topic, use_web=use_web, use_kb=use_kb)
+    ctx = build_context(topic, use_web=use_web, use_kb=use_kb, file_ids=source_file_ids)
 
     state["registry"] = ctx.sources_map
     state["findings"] = [f.model_dump() for f in ctx.findings]
@@ -475,6 +553,8 @@ def node_generate_doc(state: GraphState) -> GraphState:
         evidence_pack=evidence_pack,
         document_type=doc_type,
     )
+    from app.services.artifact_nodes import ensure_node_ids
+    ensure_node_ids(doc_model)
     state["doc_model"] = doc_model.model_dump()
     return state
 
@@ -528,6 +608,8 @@ def node_generate_deck(state: GraphState) -> GraphState:
         slide_count=slide_count,
         document_type=doc_type,
     )
+    from app.services.artifact_nodes import ensure_node_ids
+    ensure_node_ids(deck_model)
     state["deck_model"] = deck_model.model_dump()
     return state
 
@@ -1094,6 +1176,9 @@ def node_convert(state: GraphState) -> GraphState:
 def route_intent(state: GraphState) -> str:
     """Route plan action to appropriate entry node."""
     plan_data = state.get("plan", {})
+    if plan_data.get("error") or any("TEMPLATE_FILE_REQUIRED" in str(e) for e in state.get("errors", [])):
+        return "stub_node"
+
     action = plan_data.get("action", "generate")
 
     if action == "answer":
@@ -1131,6 +1216,7 @@ def build_graph() -> StateGraph:
     builder = StateGraph(GraphState)
 
     # Add Nodes
+    builder.add_node("load_context_node", node_load_context)
     builder.add_node("plan_node", node_plan)
     builder.add_node("stub_node", node_stub)
     builder.add_node("edit_node", node_edit)
@@ -1144,7 +1230,8 @@ def build_graph() -> StateGraph:
     builder.add_node("finalize_node", node_finalize)
 
     # Add Edges
-    builder.add_edge(START, "plan_node")
+    builder.add_edge(START, "load_context_node")
+    builder.add_edge("load_context_node", "plan_node")
     
     # Conditional edge from plan
     builder.add_conditional_edges(

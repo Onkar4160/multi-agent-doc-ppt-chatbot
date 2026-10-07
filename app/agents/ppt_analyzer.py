@@ -146,9 +146,12 @@ def analyze_presentation(
         has_chart = False
         words_in_slide = 0
 
+        slide_texts = []
         for shape in slide.shapes:
             if shape.has_text_frame:
                 txt = shape.text_frame.text.strip()
+                if txt:
+                    slide_texts.append(txt)
                 words_in_slide += len(txt.split())
                 for paragraph in shape.text_frame.paragraphs:
                     if paragraph.level > 0 or paragraph.text.strip().startswith(("•", "-", "1.")):
@@ -160,9 +163,15 @@ def analyze_presentation(
             if shape.has_chart:
                 has_chart = True
 
+        if not title_text and slide_texts:
+            title_text = slide_texts[0].split("\n")[0]
+
         total_words += words_in_slide
-        if title_text:
+        if slide_texts:
+            slide_text_parts.append(f"Slide {idx}: " + " | ".join(slide_texts))
+        elif title_text:
             slide_text_parts.append(f"Slide {idx}: {title_text}")
+
 
         existing_slides.append({
             "slide_number": idx,

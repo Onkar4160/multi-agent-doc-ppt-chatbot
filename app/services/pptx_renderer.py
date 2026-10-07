@@ -257,9 +257,10 @@ def render_pptx(
             m_non_ph = [s for s in layout.slide_master.shapes if not s.is_placeholder]
             source_dec_score = len(l_non_ph) * 10 + len(m_non_ph) * 2
 
-        if source_dec_score == 0:
+        if source_dec_score == 0 and slide_model.role != "title":
             _apply_light_decoration(slide, prs, accent_rgb)
             logger.info("Slide %d: Applied auto-decoration (source layout '%s' dec_score=0)", slide_idx, layout_name)
+
 
         # Speaker notes
         if slide_model.notes and hasattr(slide, "notes_slide"):
@@ -568,8 +569,9 @@ def _build_layout_candidates_map(prs: pptx.Presentation, profile: TemplateProfil
         score = dec_scores.get(idx, 0)
         l_name = layout.name.lower()
 
-        if "title" in l_name and len(layout.placeholders) <= 3:
+        if ("title slide" in l_name or "cover" in l_name or ("title" in l_name and "content" not in l_name and "header" not in l_name)) and len(layout.placeholders) <= 3:
             result["title"].append((score, idx, layout.name))
+
         if "section" in l_name or "header" in l_name:
             result["section_header"].append((score, idx, layout.name))
         if "content" in l_name or "body" in ph_types or "object" in ph_types:

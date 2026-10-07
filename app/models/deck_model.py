@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class BulletItem(BaseModel):
     """Single bullet item with nesting level and citation source IDs."""
+    node_id: str | None = None
     text: str
     level: int = Field(default=0, ge=0, le=1)
     source_ids: list[int] = Field(default_factory=list)
@@ -18,6 +19,7 @@ SlideRole = Literal["title", "section_header", "title_content", "two_content", "
 
 class SlideModel(BaseModel):
     """Model representing a single PowerPoint slide."""
+    node_id: str | None = None
     role: SlideRole = "title_content"
     title: str
     subtitle: str = ""
@@ -30,6 +32,7 @@ class SlideModel(BaseModel):
 
 class DeckModel(BaseModel):
     """Root structured content model for presentation deck generation."""
+    node_id: str | None = None
     title: str
     subtitle: str = ""
     slides: list[SlideModel] = Field(default_factory=list)

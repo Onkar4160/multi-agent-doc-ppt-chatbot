@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class ParagraphBlock(BaseModel):
     """A standard text paragraph block."""
     type: Literal["paragraph"] = "paragraph"
+    node_id: str | None = None
     text: str
     source_ids: list[int] = Field(default_factory=list)
 
@@ -16,6 +17,7 @@ class ParagraphBlock(BaseModel):
 class BulletsBlock(BaseModel):
     """A bulleted or numbered list block."""
     type: Literal["bullets"] = "bullets"
+    node_id: str | None = None
     items: list[str] = Field(default_factory=list)
     ordered: bool = False
     source_ids: list[int] = Field(default_factory=list)
@@ -24,6 +26,7 @@ class BulletsBlock(BaseModel):
 class TableBlock(BaseModel):
     """A structured table block."""
     type: Literal["table"] = "table"
+    node_id: str | None = None
     headers: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
     source_ids: list[int] = Field(default_factory=list)
@@ -34,6 +37,7 @@ Block = Union[ParagraphBlock, BulletsBlock, TableBlock]
 
 class Section(BaseModel):
     """A document section containing a heading and content blocks."""
+    node_id: str | None = None
     heading: str
     level: int = Field(default=1, ge=1, le=3)
     blocks: list[Block] = Field(default_factory=list)
@@ -41,6 +45,7 @@ class Section(BaseModel):
 
 class DocumentModel(BaseModel):
     """Root structured content model for document generation."""
+    node_id: str | None = None
     title: str
     subtitle: str = ""
     client_name: str = ""

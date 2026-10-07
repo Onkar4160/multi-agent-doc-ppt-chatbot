@@ -149,8 +149,17 @@ def parse_pptx(file_path: str | Path) -> ParsedContent:
 
     for idx, slide in enumerate(prs.slides, start=1):
         slide_title = ""
-        if slide.shapes.title and slide.shapes.title.text:
-            slide_title = slide.shapes.title.text.strip()
+        try:
+            if slide.shapes.title and slide.shapes.title.text:
+                slide_title = slide.shapes.title.text.strip()
+        except Exception:
+            pass
+
+        if not slide_title:
+            for shape in slide.shapes:
+                if getattr(shape, "has_text_frame", False) and shape.text_frame and shape.text_frame.text.strip():
+                    slide_title = shape.text_frame.text.strip().split("\n")[0]
+                    break
 
         if slide_title:
             blocks.append(ParsedBlock(
@@ -160,6 +169,7 @@ def parse_pptx(file_path: str | Path) -> ParsedContent:
                 metadata={"slide_number": idx, "layout_name": slide.slide_layout.name},
             ))
             text_parts.append(f"Slide {idx}: {slide_title}")
+
 
         body_texts: list[str] = []
         for shape in slide.shapes:
