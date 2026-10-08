@@ -19,6 +19,10 @@ class GraphState(TypedDict, total=False):
     findings: list[dict[str, Any]]
     doc_model: dict[str, Any] | None
     deck_model: dict[str, Any] | None
+    workbook_model: dict[str, Any] | None
+    current_capability: str | None
+    executed_capabilities: list[str]
+    capability_results: dict[str, Any]
     artifacts: list[dict[str, Any]]
     validation: dict[str, Any] | None
     retry_count: int

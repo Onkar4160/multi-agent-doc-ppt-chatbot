@@ -21,6 +21,7 @@ from app.agents.doc_analyzer import analyze_document
 from app.agents.doc_generator import generate_document_model
 from app.agents.ppt_analyzer import analyze_presentation
 from app.agents.ppt_generator import generate_deck_model
+from app.agents.xlsx_generator import generate_workbook_model
 from app.agents.state import GraphState
 from app.agents.supervisor import Plan, parse_plan
 from app.agents.validator import ValidationReport, validate_outputs
@@ -29,6 +30,7 @@ from app.llm.client import get_llm_client
 from app.models.artifact import Artifact, ArtifactVersion
 from app.models.deck_model import DeckModel
 from app.models.document_model import DocumentModel
+from app.models.workbook_model import WorkbookModel
 from app.models.file import UploadedFile
 from app.models.trace import AgentTrace
 from app.models.workspace import Workspace
@@ -36,6 +38,8 @@ from app.services.context_builder import build_context
 from app.services.docx_renderer import render_docx
 from app.services.evidence_pack import EvidenceItem, build_evidence_pack, format_evidence_pack
 from app.services.pptx_renderer import render_pptx
+from app.services.xlsx_renderer import render_xlsx
+from app.services.versioning import create_version_sync
 from app.services.session_context import build_session_context
 from app.services.source_registry import SourceRegistry
 
@@ -430,53 +434,63 @@ def node_analyze_templates(state: GraphState) -> GraphState:
             )
 
         plan_data = state.get("plan", {})
+        outputs = plan_data.get("outputs", ["docx", "pptx"])
         doc_tid = plan_data.get("doc_template_file_id") or active_ws.docx_template_file_id
         ppt_tid = plan_data.get("ppt_template_file_id") or active_ws.pptx_template_file_id
 
-        doc_file = (
-            db_sess.query(UploadedFile)
-            .filter(UploadedFile.id == doc_tid)
-            .first()
-        )
-        ppt_file = (
-            db_sess.query(UploadedFile)
-            .filter(UploadedFile.id == ppt_tid)
-            .first()
-        )
-        if not doc_file:
-            doc_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.docx_template_file_id).first()
-        if not ppt_file:
-            ppt_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.pptx_template_file_id).first()
-
-        if not doc_file or not Path(doc_file.stored_path).exists():
-            raise FileNotFoundError(
-                f"Active or uploaded DOCX template file missing: {doc_file.stored_path if doc_file else 'None'}"
+        doc_profile = None
+        doc_tmpl_path = None
+        if "docx" in outputs:
+            doc_file = (
+                db_sess.query(UploadedFile)
+                .filter(UploadedFile.id == doc_tid)
+                .first()
             )
-        if not ppt_file or not Path(ppt_file.stored_path).exists():
-            raise FileNotFoundError(
-                f"Active or uploaded PPTX template file missing: {ppt_file.stored_path if ppt_file else 'None'}"
+            if not doc_file:
+                doc_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.docx_template_file_id).first()
+
+            if doc_file and Path(doc_file.stored_path).exists():
+                doc_tmpl_path = Path(doc_file.stored_path)
+                if doc_file.id != active_ws.docx_template_file_id:
+                    doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
+                elif active_ws.doc_profile_json:
+                    doc_profile = json.loads(active_ws.doc_profile_json)
+                else:
+                    doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
+                    active_ws.doc_profile_json = json.dumps(doc_profile)
+                    db_sess.commit()
+            else:
+                default_docx = Path("data/sample_templates/proposal_Template.docx")
+                if default_docx.exists():
+                    doc_tmpl_path = default_docx
+                    doc_profile = analyze_document(doc_tmpl_path).model_dump()
+
+        ppt_profile = None
+        ppt_tmpl_path = None
+        if "pptx" in outputs:
+            ppt_file = (
+                db_sess.query(UploadedFile)
+                .filter(UploadedFile.id == ppt_tid)
+                .first()
             )
+            if not ppt_file:
+                ppt_file = db_sess.query(UploadedFile).filter(UploadedFile.id == active_ws.pptx_template_file_id).first()
 
-        doc_tmpl_path = Path(doc_file.stored_path)
-        ppt_tmpl_path = Path(ppt_file.stored_path)
-
-        if doc_file.id != active_ws.docx_template_file_id:
-            doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
-        elif active_ws.doc_profile_json:
-            doc_profile = json.loads(active_ws.doc_profile_json)
-        else:
-            doc_profile = analyze_document(doc_tmpl_path, file_id=doc_file.id).model_dump()
-            active_ws.doc_profile_json = json.dumps(doc_profile)
-            db_sess.commit()
-
-        if ppt_file.id != active_ws.pptx_template_file_id:
-            ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
-        elif active_ws.ppt_profile_json:
-            ppt_profile = json.loads(active_ws.ppt_profile_json)
-        else:
-            ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
-            active_ws.ppt_profile_json = json.dumps(ppt_profile)
-            db_sess.commit()
+            if ppt_file and Path(ppt_file.stored_path).exists():
+                ppt_tmpl_path = Path(ppt_file.stored_path)
+                if ppt_file.id != active_ws.pptx_template_file_id:
+                    ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
+                elif active_ws.ppt_profile_json:
+                    ppt_profile = json.loads(active_ws.ppt_profile_json)
+                else:
+                    ppt_profile = analyze_presentation(ppt_tmpl_path, file_id=ppt_file.id).model_dump()
+                    active_ws.ppt_profile_json = json.dumps(ppt_profile)
+                    db_sess.commit()
+            else:
+                default_pptx = Path("data/sample_templates/presentation_Template.pptx")
+                if default_pptx.exists():
+                    ppt_tmpl_path = default_pptx
+                    ppt_profile = analyze_presentation(ppt_tmpl_path).model_dump()
 
         state["template_profiles"] = {
             "doc_profile": doc_profile,
@@ -614,6 +628,35 @@ def node_generate_deck(state: GraphState) -> GraphState:
     return state
 
 
+@traced("generate_sheet_node")
+def node_generate_sheet(state: GraphState) -> GraphState:
+    """Generate structured WorkbookModel if requested in plan."""
+    plan_data = state.get("plan", {})
+    outputs = plan_data.get("outputs", ["xlsx"])
+
+    if "xlsx" not in outputs:
+        return state
+
+    topic = plan_data.get("topic") or state.get("user_message", "")
+    sources_map = state.get("registry", {})
+    sources_list = list(sources_map.values()) if sources_map else []
+    evidence_pack = (
+        [EvidenceItem.model_validate(e) for e in state.get("evidence_pack", [])]
+        if state.get("evidence_pack")
+        else None
+    )
+
+    wb_model = generate_workbook_model(
+        brief=topic,
+        sources=sources_list,
+        evidence_pack=evidence_pack,
+    )
+    from app.services.artifact_nodes import ensure_node_ids
+    ensure_node_ids(wb_model)
+    state["workbook_model"] = wb_model.model_dump()
+    return state
+
+
 @traced("validate_node")
 def node_validate(state: GraphState) -> GraphState:
     """Perform deterministic quality checks on generated models."""
@@ -628,15 +671,20 @@ def node_validate(state: GraphState) -> GraphState:
 
     doc_model_dict = state.get("doc_model")
     deck_model_dict = state.get("deck_model")
+    wb_model_dict = state.get("workbook_model")
 
     doc_model = (
         DocumentModel.model_validate(doc_model_dict) if doc_model_dict else None
     )
     deck_model = DeckModel.model_validate(deck_model_dict) if deck_model_dict else None
+    workbook_model = (
+        WorkbookModel.model_validate(wb_model_dict) if wb_model_dict else None
+    )
 
     report = validate_outputs(
         doc_model=doc_model,
         deck_model=deck_model,
+        workbook_model=workbook_model,
         expected_slide_count=expected_slides,
         valid_source_ids=valid_sids,
     )
@@ -754,25 +802,23 @@ def node_finalize(state: GraphState) -> GraphState:
                     db_sess.flush()
                     art_id = art.id
 
-                    ver = ArtifactVersion(
+                    ver = create_version_sync(
+                        db=db_sess,
                         artifact_id=art_id,
-                        version_no=1,
                         model_json=doc_model.model_dump_json(),
-                        file_path=str(out_docx),
-                        file_type="docx",
+                        source_file_path=out_docx,
                         change_summary="Initial generation",
-                        source_ids_json=sids_json_str,
-                        sources_json=sources_json_str,
+                        source_ids=all_sids_list,
+                        sources_json=standard_sources_map,
                     )
-                    db_sess.add(ver)
                     db_sess.commit()
 
                     artifacts_created.append({
                         "kind": "docx",
                         "artifact_id": art_id,
-                        "version": 1,
+                        "version": ver.version_no,
                         "title": doc_title,
-                        "download_url": f"/artifacts/{art_id}/download?version=1",
+                        "download_url": f"/artifacts/{art_id}/download?version={ver.version_no}",
                         "file_path": str(out_docx),
                     })
                 except Exception as exc:
@@ -797,29 +843,69 @@ def node_finalize(state: GraphState) -> GraphState:
                     db_sess.flush()
                     art_id = art.id
 
-                    ver = ArtifactVersion(
+                    ver = create_version_sync(
+                        db=db_sess,
                         artifact_id=art_id,
-                        version_no=1,
                         model_json=deck_model.model_dump_json(),
-                        file_path=str(out_pptx),
-                        file_type="pptx",
+                        source_file_path=out_pptx,
                         change_summary="Initial generation",
-                        source_ids_json=sids_json_str,
-                        sources_json=sources_json_str,
+                        source_ids=all_sids_list,
+                        sources_json=standard_sources_map,
                     )
-                    db_sess.add(ver)
                     db_sess.commit()
 
                     artifacts_created.append({
                         "kind": "pptx",
                         "artifact_id": art_id,
-                        "version": 1,
+                        "version": ver.version_no,
                         "title": deck_title,
-                        "download_url": f"/artifacts/{art_id}/download?version=1",
+                        "download_url": f"/artifacts/{art_id}/download?version={ver.version_no}",
                         "file_path": str(out_pptx),
                     })
                 except Exception as exc:
                     logger.warning(f"Failed to record PPTX artifact DB entry: {exc}")
+
+        # 3. Render & Save XLSX
+        wb_model_dict = state.get("workbook_model")
+        if wb_model_dict:
+            wb_model = WorkbookModel.model_validate(wb_model_dict)
+            out_xlsx = output_dir / f"Workbook_{uuid.uuid4().hex[:8]}.xlsx"
+            render_xlsx(wb_model, out_xlsx)
+
+            if db_sess:
+                try:
+                    sheet_title = str(wb_model.title)
+                    art = Artifact(
+                        artifact_type="xlsx",
+                        title=sheet_title,
+                        session_id=session_id,
+                        run_id=run_id,
+                    )
+                    db_sess.add(art)
+                    db_sess.flush()
+                    art_id = art.id
+
+                    ver = create_version_sync(
+                        db=db_sess,
+                        artifact_id=art_id,
+                        model_json=wb_model.model_dump_json(),
+                        source_file_path=out_xlsx,
+                        change_summary="Initial generation",
+                        source_ids=all_sids_list,
+                        sources_json=standard_sources_map,
+                    )
+                    db_sess.commit()
+
+                    artifacts_created.append({
+                        "kind": "xlsx",
+                        "artifact_id": art_id,
+                        "version": ver.version_no,
+                        "title": sheet_title,
+                        "download_url": f"/artifacts/{art_id}/download?version={ver.version_no}",
+                        "file_path": str(out_xlsx),
+                    })
+                except Exception as exc:
+                    logger.warning(f"Failed to record XLSX artifact DB entry: {exc}")
     finally:
         if db_sess:
             db_sess.close()
@@ -901,35 +987,42 @@ def node_edit(state: GraphState) -> GraphState:
             db_sess.close()
             return state
 
-        # Determine target type from prompt keywords
-        msg_lower = resolved_msg.lower()
+        # Determine target kind from ExecutionPlan
         target_kind = None
-        if any(w in msg_lower for w in ["slide", "presentation", "deck"]):
-            target_kind = "pptx"
-        elif any(w in msg_lower for w in ["document", "report", "proposal", "doc"]):
-            target_kind = "docx"
+        plan_art_types = plan_data.get("artifact_types", [])
+        if plan_art_types:
+            target_kind = str(plan_art_types[0]).lower()
 
         # Check if topic addition
         is_topic_addition = plan_data.get("needs_new_facts", False) or bool(
-            re.search(r"\b(add|append|include|also|expand|new\s+topic|information\s+about)\b", msg_lower)
+            re.search(r"\b(add|append|include|also|expand|new\s+topic|information\s+about)\b", resolved_msg.lower())
         )
 
         # Resolve target artifacts
         target_arts = []
-        if is_topic_addition and not target_kind:
+        has_explicit_format = bool(
+            re.search(r"\b(deck|slide|slides|presentation|powerpoint|document|report|proposal|word|sheet|spreadsheet|excel)\b", resolved_msg.lower())
+        )
+        if is_topic_addition and not has_explicit_format:
             docx_art = next((a for a in artifacts if a.artifact_type == "docx"), None)
             pptx_art = next((a for a in artifacts if a.artifact_type == "pptx"), None)
-            target_arts = [a for a in [docx_art, pptx_art] if a is not None]
-        elif target_ids:
-            target_arts = [a for a in artifacts if a.id in target_ids]
-
-        if not target_arts:
-            if target_kind:
+            xlsx_art = next((a for a in artifacts if a.artifact_type == "xlsx"), None)
+            all_types = [a for a in [docx_art, pptx_art, xlsx_art] if a is not None]
+            if len(all_types) > 1:
+                target_arts = all_types
+            elif target_ids:
+                target_arts = [a for a in artifacts if a.id in target_ids]
+            elif target_kind:
                 target_arts = [a for a in artifacts if a.artifact_type == target_kind][:1]
             else:
-                docx_art = next((a for a in artifacts if a.artifact_type == "docx"), None)
-                pptx_art = next((a for a in artifacts if a.artifact_type == "pptx"), None)
-                target_arts = [a for a in [docx_art, pptx_art] if a is not None]
+                target_arts = all_types
+        elif target_ids:
+            target_arts = [a for a in artifacts if a.id in target_ids]
+        elif target_kind:
+            target_arts = [a for a in artifacts if a.artifact_type == target_kind][:1]
+
+        if not target_arts:
+            target_arts = artifacts[:1]
 
         if not target_arts:
             state["reply"] = "No matching artifact found to edit in this session. Please generate a document or presentation first."
@@ -945,9 +1038,10 @@ def node_edit(state: GraphState) -> GraphState:
         if not active_topic:
             active_topic = target_info[0]["title"]
 
-        # Check if addition/refresh requires scoped research (at most 1 research pass per edit)
-        use_web = plan_data.get("use_web", True)
-        use_kb = plan_data.get("use_kb", True)
+        # Check if addition/refresh requires scoped research
+        source_reqs = plan_data.get("source_requirements", {})
+        use_web = source_reqs.get("web", plan_data.get("use_web", False))
+        use_kb = source_reqs.get("knowledge_base", plan_data.get("use_rag", plan_data.get("use_kb", False)))
         shared_ctx = None
         clean_sub = re.sub(
             r"^(also\s+)?(add\s+a\s+section\s+on|add\s+section\s+on|add\s+|include\s+a\s+section\s+on|include\s+|append\s+)",
@@ -1007,12 +1101,14 @@ def node_edit(state: GraphState) -> GraphState:
             )
             old_v_no = old_ver_rec.version_no if old_ver_rec else 1
 
+            plan_target_nodes = plan_data.get("target_nodes") or []
             res = edit_artifact(
                 artifact_id=art_id,
                 instruction=resolved_msg,
                 db_session=db_sess,
                 active_topic=active_topic,
                 shared_context=shared_ctx,
+                target_nodes=plan_target_nodes,
             )
             if res.no_sources_warning and not warning_msg:
                 warning_msg = res.no_sources_warning
@@ -1201,11 +1297,13 @@ def should_retry(state: GraphState) -> str:
         state["retry_count"] = retry_count + 1
         logger.info("Validation failed. Retrying generation once with issue feedback...")
         plan_data = state.get("plan", {})
-        outputs = plan_data.get("outputs", ["docx", "pptx"])
+        outputs = plan_data.get("outputs", ["docx", "pptx", "xlsx"])
         if "docx" in outputs:
             return "generate_doc_node"
-        else:
+        elif "pptx" in outputs:
             return "generate_deck_node"
+        else:
+            return "generate_sheet_node"
     return "finalize_node"
 
 
@@ -1226,6 +1324,7 @@ def build_graph() -> StateGraph:
     builder.add_node("gather_context_node", node_gather_context)
     builder.add_node("generate_doc_node", node_generate_doc)
     builder.add_node("generate_deck_node", node_generate_deck)
+    builder.add_node("generate_sheet_node", node_generate_sheet)
     builder.add_node("validate_node", node_validate)
     builder.add_node("finalize_node", node_finalize)
 
@@ -1255,7 +1354,8 @@ def build_graph() -> StateGraph:
     builder.add_edge("analyze_templates_node", "gather_context_node")
     builder.add_edge("gather_context_node", "generate_doc_node")
     builder.add_edge("generate_doc_node", "generate_deck_node")
-    builder.add_edge("generate_deck_node", "validate_node")
+    builder.add_edge("generate_deck_node", "generate_sheet_node")
+    builder.add_edge("generate_sheet_node", "validate_node")
 
     # Conditional retry edge
     builder.add_conditional_edges(
@@ -1264,6 +1364,7 @@ def build_graph() -> StateGraph:
         {
             "generate_doc_node": "generate_doc_node",
             "generate_deck_node": "generate_deck_node",
+            "generate_sheet_node": "generate_sheet_node",
             "finalize_node": "finalize_node",
         },
     )

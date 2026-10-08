@@ -47,13 +47,16 @@ class ResolvedReferences(BaseModel):
 
 PRONOUN_PATTERN = re.compile(r"\b(it|this|that|them|these|those)\b", re.IGNORECASE)
 DOC_REFERENCE_PATTERN = re.compile(
-    r"\b(the\s+(?:document|report|proposal|word\s+doc|word\s+document))\b", re.IGNORECASE
+    r"\b(?:the\s+(?:first\s+|second\s+|third\s+|initial\s+|prior\s+|previous\s+|last\s+|same\s+)?(?:document|report|proposal|word\s+doc|word\s+document)|same\s+(?:document|report|proposal|word\s+doc)|first\s+(?:document|report|proposal)|second\s+(?:document|report|proposal)|initial\s+(?:document|report|proposal)|this\s+(?:document|report|proposal))\b",
+    re.IGNORECASE,
 )
 DECK_REFERENCE_PATTERN = re.compile(
-    r"\b(the\s+(?:presentation|deck|slides?|slideshow|powerpoint))\b", re.IGNORECASE
+    r"\b(?:the\s+(?:first\s+|second\s+|third\s+|initial\s+|prior\s+|previous\s+|last\s+|same\s+)?(?:presentation|deck|slides?|slideshow|powerpoint)|same\s+(?:presentation|deck|slideshow)|first\s+(?:presentation|deck|slides?)|second\s+(?:presentation|deck|slides?)|initial\s+(?:presentation|deck|slides?)|this\s+(?:presentation|deck))\b",
+    re.IGNORECASE,
 )
 SHEET_REFERENCE_PATTERN = re.compile(
-    r"\b(the\s+(?:spreadsheet|workbook|excel|sheet|table))\b", re.IGNORECASE
+    r"\b(?:the\s+(?:first\s+|second\s+|third\s+|initial\s+|prior\s+|previous\s+|last\s+|same\s+)?(?:spreadsheet|workbook|excel|sheet|table)|same\s+(?:spreadsheet|workbook|sheet)|first\s+(?:spreadsheet|workbook|sheet)|second\s+(?:spreadsheet|workbook|sheet)|initial\s+(?:spreadsheet|workbook|sheet)|this\s+(?:spreadsheet|workbook|sheet))\b",
+    re.IGNORECASE,
 )
 PREVIOUS_VERSION_PATTERN = re.compile(
     r"\b(previous\s+version|last\s+version|prior\s+version|v(?:\s*)(\d+))\b", re.IGNORECASE
@@ -72,16 +75,31 @@ UPLOADED_TEMPLATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 UPLOADED_SOURCE_PATTERN = re.compile(
-    r"\b(uploaded\s+pdf|attached\s+pdf|uploaded\s+docx?|uploaded\s+pptx?|uploaded\s+xlsx?|"
+    r"\b(?:uploaded\s+pdf|attached\s+pdf|uploaded\s+docx?|uploaded\s+pptx?|uploaded\s+xlsx?|"
     r"uploaded\s+file|attached\s+file|attached\s+files|attached\s+report|uploaded\s+document|"
     r"attached\s+document|attached\s+documents|the\s+pdf|this\s+file|attached\s+information|"
-    r"attached\s+research|research\s+documents?|research\s+document)\b",
+    r"attached\s+research|research\s+documents?|research\s+document|"
+    r"(?:the\s+)?file\s+(?:I\s+)?uploaded(?:\s+previously|\s+earlier)?|"
+    r"(?:the\s+)?report\s+(?:I\s+)?uploaded(?:\s+previously|\s+earlier)?|"
+    r"uploaded\s+previously|uploaded\s+earlier)\b",
     re.IGNORECASE,
 )
-SLIDE_NODE_PATTERN = re.compile(r"\b(slide\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten))\b", re.IGNORECASE)
+ORDINAL_MAP = {
+    "first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+    "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
+}
+SLIDE_NODE_PATTERN = re.compile(
+    r"\b((?:slide|page)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)|"
+    r"(\d+)(?:st|nd|rd|th)\s+(?:slide|page)|"
+    r"(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+(?:slide|page)|"
+    r"(?:the\s+)?(previous|prior|penultimate|last|final)\s+(?:slide|page))\b",
+    re.IGNORECASE,
+)
 SECTION_NODE_PATTERN = re.compile(
     r"\b(executive\s+summary|introduction|conclusion|methodology|solution|"
-    r"timeline|commercials|pricing|background|overview|recommendations?|end\s+of\s+(?:the\s+)?document)\b",
+    r"timeline|commercials|pricing|background|overview|recommendations?|"
+    r"financial\s+section|financials?|market\s+section|pricing\s+section|"
+    r"end\s+of\s+(?:the\s+)?document)\b",
     re.IGNORECASE,
 )
 
@@ -102,11 +120,52 @@ def resolve_references(
     reasoning: list[str] = []
     msg_lower = user_message.lower()
 
-    # 1. Extract Target Nodes (e.g. "slide 5", "executive summary", "conclusion", "end")
+    # 1. Extract Target Nodes (e.g. "slide 5", "previous slide", "executive summary", "conclusion", "end")
     slide_matches = SLIDE_NODE_PATTERN.findall(user_message)
     for sm in slide_matches:
-        res.target_nodes.append(sm[0].lower())
+        raw_match = sm[0].lower()
+        res.target_nodes.append(raw_match)
+        # Normalize ordinals (e.g. "fifth page" -> "page 5")
+        norm = raw_match
+        for ord_word, num in ORDINAL_MAP.items():
+            if ord_word in norm:
+                norm = norm.replace(ord_word, num).strip()
+        norm = re.sub(r"(\d+)(?:st|nd|rd|th)\s+(slide|page)", r"\2 \1", norm).strip()
+        norm = re.sub(r"(\d+)\s+(slide|page)", r"\2 \1", norm).strip()
+        if norm not in res.target_nodes:
+            res.target_nodes.append(norm)
+        if "page" in norm:
+            alt = norm.replace("page", "slide")
+            if alt not in res.target_nodes:
+                res.target_nodes.append(alt)
+        elif "slide" in norm:
+            alt = norm.replace("slide", "page")
+            if alt not in res.target_nodes:
+                res.target_nodes.append(alt)
         reasoning.append(f"Target node identified: '{sm[0]}'")
+
+    # Relative slide resolution (e.g. "previous slide" / "prior slide")
+    for raw_tn in list(res.target_nodes):
+        if "previous slide" in raw_tn or "prior slide" in raw_tn or "the previous slide" in raw_tn:
+            prev_idx = None
+            if ctx.last_target_nodes:
+                for ltn in ctx.last_target_nodes:
+                    m = re.search(r"\b(\d+)\b", str(ltn))
+                    if m:
+                        val = int(m.group(1))
+                        if val > 1:
+                            prev_idx = val - 1
+                            break
+            if prev_idx is None and ctx.active_artifact and ctx.active_artifact.get("outline"):
+                prev_idx = max(1, len(ctx.active_artifact["outline"]) - 1)
+            if prev_idx is not None:
+                s_label = f"slide {prev_idx}"
+                s_node = f"slide_{prev_idx:03d}"
+                if s_label not in res.target_nodes:
+                    res.target_nodes.append(s_label)
+                if s_node not in res.target_nodes:
+                    res.target_nodes.append(s_node)
+                reasoning.append(f"Resolved '{raw_tn}' to slide {prev_idx} based on conversation history.")
 
     sec_matches = SECTION_NODE_PATTERN.findall(user_message)
     for sc in sec_matches:
@@ -185,7 +244,10 @@ def resolve_references(
     elif has_doc_ref:
         docx_candidates = [a for a in artifacts if a.get("kind") == "docx"]
         if docx_candidates:
-            resolved_art = docx_candidates[-1]
+            if "first" in msg_lower or "initial" in msg_lower:
+                resolved_art = docx_candidates[0]
+            else:
+                resolved_art = docx_candidates[-1]
             res.target_artifact_type = ArtifactType.DOCX
             reasoning.append(f"Target resolved to DOCX artifact: ID {resolved_art.get('artifact_id')}")
         else:
@@ -216,6 +278,16 @@ def resolve_references(
             res.unresolved_references.append("pronoun")
             res.confidence = 0.4
             reasoning.append("Pronoun could not be resolved because no active artifact exists in session.")
+    elif active_art:
+        resolved_art = active_art
+        kind = active_art.get("kind", "").upper()
+        if kind == "PPTX":
+            res.target_artifact_type = ArtifactType.PPTX
+        elif kind == "DOCX":
+            res.target_artifact_type = ArtifactType.DOCX
+        elif kind == "XLSX":
+            res.target_artifact_type = ArtifactType.XLSX
+        reasoning.append(f"Target implicitly resolved to active artifact: ID {active_art.get('artifact_id')} ({kind})")
 
     if resolved_art:
         res.target_artifact_id = resolved_art.get("artifact_id")

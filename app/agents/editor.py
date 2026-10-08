@@ -18,17 +18,24 @@ from app.llm.client import get_llm_client, LLMClient
 from app.models.artifact import Artifact, ArtifactVersion
 from app.models.deck_model import BulletItem, DeckModel, SlideModel
 from app.models.document_model import DocumentModel, Section
+from app.models.workbook_model import CellModel, SheetModel, TableModel, WorkbookModel
 from app.models.edit_ops import (
+    AddRowOp,
     AddSectionOp,
+    AddSheetOp,
     AddSlideOp,
     CondenseDeckOp,
     DeleteSectionOp,
+    DeleteSheetOp,
     DeleteSlideOp,
     EditPlan,
     MoveSlideOp,
     Op,
     RefreshWithWebOp,
+    UpdateCellOp,
+    UpdateParagraphOp,
     UpdateSectionOp,
+    UpdateSheetOp,
     UpdateSlideOp,
     UpdateTitleOp,
 )
@@ -41,6 +48,8 @@ from app.services.diffing import diff_models
 from app.services.docx_renderer import render_docx
 from app.services.evidence_pack import EvidenceItem, build_evidence_pack, format_evidence_pack
 from app.services.pptx_renderer import render_pptx
+from app.services.versioning import create_version_sync
+from app.services.xlsx_renderer import render_xlsx
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +110,7 @@ RULES:
 def _generate_edit_plan(
     instruction: str,
     artifact_type: str,
-    model: DocumentModel | DeckModel,
+    model: DocumentModel | DeckModel | WorkbookModel,
     profile: Any,
     llm_client: LLMClient,
     evidence_pack: list[Any] | None = None,
@@ -119,6 +128,13 @@ def _generate_edit_plan(
             if getattr(profile, "doc_outline", None)
             else "Standard document section layout"
         )
+    elif isinstance(model, WorkbookModel):
+        outline_lines = [
+            f"- Sheet: '{s.name}' ({len(s.tables)} tables, {len(s.cells)} cells)"
+            for s in model.sheets
+        ]
+        outline_summary = "\n".join(outline_lines)
+        layout_roles = "Standard spreadsheet workbook tables and formulas"
     else:
         outline_lines = [
             f"- Slide {idx+1} [{s.role}]: '{s.title}'"
@@ -212,6 +228,21 @@ def _apply_ops_to_docx(model: DocumentModel, ops: list[Op]) -> DocumentModel:
             if idx != -1:
                 sections[idx].blocks = new_blocks
 
+        elif op_type == "update_paragraph":
+            from app.models.document_model import ParagraphBlock
+            target_h = getattr(op, "heading", None)
+            p_idx = getattr(op, "paragraph_index", 1) - 1
+            new_text = getattr(op, "new_text", "")
+            sids = getattr(op, "source_ids", [])
+            for sec in sections:
+                if not target_h or sec.heading.lower() == target_h.lower():
+                    paras = [b for b in sec.blocks if isinstance(b, ParagraphBlock) or getattr(b, "type", "") == "paragraph"]
+                    if 0 <= p_idx < len(paras):
+                        paras[p_idx].text = new_text
+                        if sids:
+                            paras[p_idx].source_ids = sids
+                        break
+
         elif op_type == "delete_section":
             target_h = getattr(op, "heading", "")
             sections[:] = [s for s in sections if s.heading.lower() != target_h.lower()]
@@ -274,6 +305,74 @@ def _apply_ops_to_pptx(model: DeckModel, ops: list[Op]) -> DeckModel:
     return new_model
 
 
+def _apply_ops_to_xlsx(model: WorkbookModel, ops: list[Op]) -> WorkbookModel:
+    """Deterministically apply spreadsheet operations to WorkbookModel copy."""
+    new_model = WorkbookModel.model_validate(model.model_dump())
+    sheets = new_model.sheets
+
+    for op in ops:
+        op_type = getattr(op, "type", "")
+        if op_type == "add_sheet":
+            sheet = getattr(op, "sheet", None)
+            if sheet:
+                sheets.append(sheet)
+
+        elif op_type == "update_sheet":
+            sheet_name = getattr(op, "sheet_name", "")
+            target_sheet = next((s for s in sheets if s.name.lower() == sheet_name.lower()), None)
+            if target_sheet:
+                if getattr(op, "tables", None) is not None:
+                    target_sheet.tables = op.tables
+                if getattr(op, "cells", None) is not None:
+                    target_sheet.cells = op.cells
+
+        elif op_type == "update_cell":
+            sheet_name = getattr(op, "sheet_name", "")
+            coord = getattr(op, "coordinate", "").upper()
+            target_sheet = next((s for s in sheets if s.name.lower() == sheet_name.lower()), None)
+            if target_sheet:
+                existing_cell = next((c for c in target_sheet.cells if c.coordinate.upper() == coord), None)
+                if existing_cell:
+                    if getattr(op, "value", None) is not None:
+                        existing_cell.value = op.value
+                    if getattr(op, "formula", None) is not None:
+                        existing_cell.formula = op.formula
+                else:
+                    from app.models.workbook_model import CellModel
+                    target_sheet.cells.append(
+                        CellModel(
+                            coordinate=coord,
+                            value=getattr(op, "value", None),
+                            formula=getattr(op, "formula", None),
+                        )
+                    )
+
+        elif op_type == "add_row":
+            sheet_name = getattr(op, "sheet_name", "")
+            table_title = getattr(op, "table_title", "")
+            row_data = getattr(op, "row_data", [])
+            target_sheet = next((s for s in sheets if s.name.lower() == sheet_name.lower()), None)
+            if target_sheet:
+                target_table = None
+                if table_title:
+                    target_table = next((t for t in target_sheet.tables if t.title and t.title.lower() == table_title.lower()), None)
+                if not target_table and target_sheet.tables:
+                    target_table = target_sheet.tables[0]
+                if target_table:
+                    target_table.rows.append(row_data)
+
+        elif op_type == "delete_sheet":
+            sheet_name = getattr(op, "sheet_name", "")
+            sheets[:] = [s for s in sheets if s.name.lower() != sheet_name.lower()]
+
+        elif op_type == "update_title":
+            if getattr(op, "title", None):
+                new_model.title = op.title
+
+    return new_model
+
+
+
 def edit_artifact(
     artifact_id: int,
     instruction: str,
@@ -282,6 +381,7 @@ def edit_artifact(
     db_session: Session | None = None,
     active_topic: str = "",
     shared_context: Any = None,
+    target_nodes: list[str] | None = None,
 ) -> EditResult:
     """Conversational edit agent executing deterministic ops, deck condensing, or web refresh.
 
@@ -293,6 +393,7 @@ def edit_artifact(
         db_session: SQLAlchemy Session.
         active_topic: Active topic context from session to anchor additions.
         shared_context: Optional precomputed research context to reuse across formats.
+        target_nodes: Planned target node IDs from ExecutionPlan for scope validation.
 
     Returns:
         EditResult containing new version number, diff, file path, and download URL.
@@ -368,6 +469,14 @@ def edit_artifact(
             profile = analyze_document(tmpl_path)
         elif not profile:
             profile = TemplateProfile(colors={"primary": "#000000"})
+    elif art_type == "xlsx":
+        old_model = WorkbookModel.model_validate_json(old_model_json)
+        ensure_node_ids(old_model)
+        target_check = resolve_target(instruction, old_model)
+        if not target_check.is_valid and target_check.error_code == "INVALID_TARGET":
+            raise ValueError(f"Target validation failed: {target_check.error_message}")
+        tmpl_path = None
+        profile = TemplateProfile(colors={"primary": "#107C41"})
     else:
         old_model = DeckModel.model_validate_json(old_model_json)
         ensure_node_ids(old_model)
@@ -589,6 +698,8 @@ def edit_artifact(
     # 3. Apply Ops
     if art_type == "docx":
         new_model = _apply_ops_to_docx(old_model, edit_plan.ops)
+    elif art_type == "xlsx":
+        new_model = _apply_ops_to_xlsx(old_model, edit_plan.ops)
     else:
         new_model = _apply_ops_to_pptx(old_model, edit_plan.ops)
 
@@ -615,6 +726,8 @@ def edit_artifact(
             )
             if art_type == "docx":
                 new_model = _apply_ops_to_docx(old_model, edit_plan.ops)
+            elif art_type == "xlsx":
+                new_model = _apply_ops_to_xlsx(old_model, edit_plan.ops)
             else:
                 new_model = _apply_ops_to_pptx(old_model, edit_plan.ops)
         except Exception as retry_exc:
@@ -686,6 +799,8 @@ def edit_artifact(
             try:
                 if isinstance(new_model, DocumentModel):
                     new_model = llm.generate_json(prompt=refresh_prompt, schema=DocumentModel)
+                elif isinstance(new_model, WorkbookModel):
+                    new_model = llm.generate_json(prompt=refresh_prompt, schema=WorkbookModel)
                 else:
                     new_model = llm.generate_json(prompt=refresh_prompt, schema=DeckModel)
                 for sid_k, s_v in r_ctx.sources_map.items():
@@ -730,6 +845,7 @@ def edit_artifact(
     # 8. Compute Diff
     ensure_node_ids(new_model)
     diff = diff_models(old_model, new_model)
+    actually_changed_nodes = diff.get("changed", []) + diff.get("added", []) + diff.get("removed", [])
 
     # 9. Render & Validate
     output_dir = Path("data/outputs")
@@ -739,41 +855,56 @@ def edit_artifact(
     if art_type == "docx":
         out_file = output_dir / f"Proposal_{artifact_id}_v{next_ver_no}.docx"
         render_docx(new_model, tmpl_path, profile, out_file, sources_map=standard_sources_map)
-        validate_outputs(
-            doc_model=new_model, valid_source_ids=valid_sids_set
+        val_rep = validate_outputs(
+            doc_model=new_model,
+            valid_source_ids=valid_sids_set,
+            target_nodes=target_nodes,
+            actually_changed_nodes=actually_changed_nodes,
+        )
+    elif art_type == "xlsx":
+        from app.services.xlsx_renderer import render_xlsx
+        out_file = output_dir / f"Workbook_{artifact_id}_v{next_ver_no}.xlsx"
+        render_xlsx(new_model, out_file)
+        val_rep = validate_outputs(
+            workbook_model=new_model,
+            valid_source_ids=valid_sids_set,
+            target_nodes=target_nodes,
+            actually_changed_nodes=actually_changed_nodes,
         )
     else:
         out_file = output_dir / f"Deck_{artifact_id}_v{next_ver_no}.pptx"
         render_pptx(new_model, tmpl_path, profile, out_file, sources_map=standard_sources_map)
-        validate_outputs(
+        val_rep = validate_outputs(
             deck_model=new_model,
             expected_slide_count=len(new_model.slides),
             valid_source_ids=valid_sids_set,
+            target_nodes=target_nodes,
+            actually_changed_nodes=actually_changed_nodes,
         )
+
+    # Scope error check
+    scope_errors = [issue for issue in val_rep.issues if issue.where.startswith("scope:")]
+    if scope_errors:
+        logger.warning(f"Scope validation failed: {scope_errors[0].message}")
 
     # 10. Update Artifact Title if changed
     if new_model.title and str(artifact.title) != str(new_model.title):
         artifact.title = str(new_model.title)
 
-    # 11. Save NEW version record
-    new_ver_rec = ArtifactVersion(
+    # 11. Authoritative Version Creation via versioning service
+    from app.services.versioning import create_version_sync
+    new_ver_rec = create_version_sync(
+        db=db_session,
         artifact_id=artifact_id,
-        version_no=next_ver_no,
         model_json=new_model.model_dump_json(),
-        file_path=str(out_file),
-        file_type=art_type,
-        parent_version_id=ver_id,
+        source_file_path=out_file,
         change_summary=edit_plan.summary or instruction[:150],
-        source_ids_json=json.dumps(list(sorted(valid_sids_set))),
-        sources_json=json.dumps(standard_sources_map),
-        diff_json=json.dumps(diff),
+        source_ids=list(sorted(valid_sids_set)),
+        sources_json=standard_sources_map,
+        parent_version_id=ver_id,
+        diff_json=diff,
     )
-    db_session.add(new_ver_rec)
-    try:
-        db_session.commit()
-    except Exception as exc:
-        db_session.rollback()
-        raise exc
+    db_session.commit()
 
     llm_calls_used = llm.stats.total_calls - initial_llm_calls
 

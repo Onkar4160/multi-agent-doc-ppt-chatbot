@@ -106,6 +106,17 @@ def diff_models(
             else:
                 unchanged_nodes.append(nid)
 
+        # Check granular block level diffs
+        old_blk_map = {b.node_id: b for s in old_model.sections for b in s.blocks if b.node_id}
+        new_blk_map = {b.node_id: b for s in new_model.sections for b in s.blocks if b.node_id}
+        for b_id, new_b in new_blk_map.items():
+            if b_id in old_blk_map:
+                if old_blk_map[b_id].model_dump_json() != new_b.model_dump_json():
+                    if b_id not in modified_nodes:
+                        changed_nodes.append({"node_id": b_id, "change_type": "UPDATED"})
+                        modified_nodes.append(b_id)
+                        changed.append(f"Block '{b_id}'")
+
     # 2. DeckModel Diff
     elif isinstance(old_model, DeckModel) and isinstance(new_model, DeckModel):
         ensure_node_ids(old_model)
@@ -168,8 +179,38 @@ def diff_models(
             deleted_nodes.append(nid)
             removed.append(f"Node '{nid}'")
 
+        # Check sheets
+        old_sheet_map = {s.name.lower(): s for s in old_model.sheets}
+        new_sheet_map = {s.name.lower(): s for s in new_model.sheets}
+        for s_name, new_s in new_sheet_map.items():
+            if s_name not in old_sheet_map:
+                added.append(f"Sheet '{new_s.name}'")
+            else:
+                old_s = old_sheet_map[s_name]
+                if old_s.model_dump_json() != new_s.model_dump_json():
+                    changed.append(f"Sheet '{new_s.name}'")
+        for s_name, old_s in old_sheet_map.items():
+            if s_name not in new_sheet_map:
+                removed.append(f"Sheet '{old_s.name}'")
+
+        # Check cells
+        old_cell_map = {c.coordinate.upper(): c for s in old_model.sheets for c in s.cells}
+        new_cell_map = {c.coordinate.upper(): c for s in new_model.sheets for c in s.cells}
+        for coord, new_c in new_cell_map.items():
+            safe_id = f"cell_{coord}"
+            if coord in old_cell_map:
+                old_c = old_cell_map[coord]
+                if old_c.value != new_c.value or old_c.formula != new_c.formula:
+                    changed_nodes.append({"node_id": safe_id, "change_type": "UPDATED"})
+                    modified_nodes.append(safe_id)
+                    changed.append(f"Cell {coord}")
+            else:
+                added_nodes.append(safe_id)
+                changed.append(f"Cell {coord} added")
+
         for nid in old_ids & new_ids:
-            unchanged_nodes.append(nid)
+            if nid not in modified_nodes:
+                unchanged_nodes.append(nid)
 
     summary_parts = []
     if added:

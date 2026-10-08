@@ -65,6 +65,16 @@ async def add_version(
     current_max = res.scalar() or 0
     new_version_no = current_max + 1
 
+    if parent_version_id is None and current_max > 0:
+        stmt_prev = select(ArtifactVersion).where(
+            ArtifactVersion.artifact_id == artifact_id,
+            ArtifactVersion.version_no == current_max,
+        )
+        res_prev = await db.execute(stmt_prev)
+        prev_ver = res_prev.scalar_one_or_none()
+        if prev_ver:
+            parent_version_id = prev_ver.id
+
     ext = src_path.suffix.lower()
     dest_dir = Path(get_settings().storage_dir) / "artifacts" / str(artifact_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +100,62 @@ async def add_version(
     await db.flush()
 
     logger.info("Added Artifact %d Version %d saved at %s", artifact_id, new_version_no, dest_path)
+    return version_record
+
+
+def create_version_sync(
+    db: Any,
+    artifact_id: int,
+    model_json: str,
+    source_file_path: str | Path,
+    change_summary: str | None = "Initial generation",
+    source_ids: list[int] = [],
+    sources_json: dict | str | None = None,
+    parent_version_id: int | None = None,
+    diff_json: str | dict | list | None = None,
+) -> ArtifactVersion:
+    """Synchronous authoritative version creation saving to storage and returning ArtifactVersion."""
+    src_path = Path(source_file_path)
+    if not src_path.exists():
+        src_path.parent.mkdir(parents=True, exist_ok=True)
+        src_path.write_bytes(b"")
+
+    current_max = db.query(func.max(ArtifactVersion.version_no)).filter(ArtifactVersion.artifact_id == artifact_id).scalar() or 0
+    new_version_no = current_max + 1
+
+    if parent_version_id is None and current_max > 0:
+        prev_ver = db.query(ArtifactVersion).filter(
+            ArtifactVersion.artifact_id == artifact_id,
+            ArtifactVersion.version_no == current_max,
+        ).first()
+        if prev_ver:
+            parent_version_id = prev_ver.id
+
+    ext = src_path.suffix.lower()
+    dest_dir = Path(get_settings().storage_dir) / "artifacts" / str(artifact_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / f"v{new_version_no}{ext}"
+
+    shutil.copy2(src_path, dest_path)
+
+    d_json_str = diff_json if isinstance(diff_json, str) or diff_json is None else json.dumps(diff_json)
+    s_json_str = sources_json if isinstance(sources_json, str) or sources_json is None else json.dumps(sources_json)
+
+    version_record = ArtifactVersion(
+        artifact_id=artifact_id,
+        version_no=new_version_no,
+        model_json=model_json,
+        file_path=str(dest_path),
+        file_type=ext.lstrip("."),
+        parent_version_id=parent_version_id,
+        change_summary=change_summary,
+        source_ids_json=json.dumps(source_ids),
+        sources_json=s_json_str,
+        diff_json=d_json_str,
+    )
+    db.add(version_record)
+    db.flush()
+    logger.info("Sync added Artifact %d Version %d saved at %s", artifact_id, new_version_no, dest_path)
     return version_record
 
 

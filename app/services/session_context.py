@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.artifact import Artifact, ArtifactVersion
 from app.models.chat import ChatMessage
 from app.models.context import ConversationContext
+from app.models.file import UploadedFile
 from app.models.run import AgentRun
 from app.models.workspace import Workspace
 
@@ -64,16 +65,45 @@ def build_conversation_context(
         .all()
     )
 
+    # 2. Fetch session-scoped uploaded files
+    session_files = (
+        db.query(UploadedFile)
+        .filter(UploadedFile.session_id == session_id)
+        .order_by(UploadedFile.id.asc())
+        .all()
+    )
+    uploaded_files_data = [
+        {
+            "id": f.id,
+            "filename": f.filename,
+            "file_type": f.file_type,
+            "purpose": f.purpose or "REFERENCE",
+            "stored_path": f.stored_path,
+        }
+        for f in session_files
+    ]
+
+    # 3. Fetch session-scoped artifacts
+    session_artifacts = (
+        db.query(Artifact)
+        .filter(Artifact.session_id == session_id)
+        .order_by(Artifact.id.asc())
+        .all()
+    )
+
     artifacts_data: list[dict[str, Any]] = []
     latest_docx_id = None
     latest_pptx_id = None
+    latest_xlsx_id = None
 
-    # Track newest artifact of each kind to mark active pair
+    # Track newest artifact of each kind to mark active set
     for art in reversed(session_artifacts):
         if art.artifact_type == "docx" and latest_docx_id is None:
             latest_docx_id = art.id
         elif art.artifact_type == "pptx" and latest_pptx_id is None:
             latest_pptx_id = art.id
+        elif art.artifact_type == "xlsx" and latest_xlsx_id is None:
+            latest_xlsx_id = art.id
 
     active_art_dict: dict[str, Any] | None = None
     active_version_num: int | None = None
@@ -100,6 +130,13 @@ def build_conversation_context(
                         for i, s in enumerate(secs)
                         if s.get("heading")
                     ][:15]
+                elif art.artifact_type == "xlsx":
+                    sheets = m_data.get("sheets", [])
+                    outline = [
+                        f"{i+1}. Sheet: {sh.get('name', '')} ({len(sh.get('cells', []))} cells)"
+                        for i, sh in enumerate(sheets)
+                        if sh.get("name")
+                    ][:15]
                 else:
                     slides = m_data.get("slides", [])
                     outline = [
@@ -110,8 +147,8 @@ def build_conversation_context(
             except Exception as exc:
                 logger.debug(f"Failed to parse model_json for outline: {exc}")
 
-        is_active = (art.id == latest_docx_id) or (art.id == latest_pptx_id)
-        if not session_artifacts or (latest_docx_id is None and latest_pptx_id is None):
+        is_active = (art.id == latest_docx_id) or (art.id == latest_pptx_id) or (art.id == latest_xlsx_id)
+        if not session_artifacts or (latest_docx_id is None and latest_pptx_id is None and latest_xlsx_id is None):
             is_active = True
 
         art_dict = {
@@ -137,10 +174,11 @@ def build_conversation_context(
                 except Exception:
                     pass
 
-    # 3. Active topic & recent operations from session runs
+    # 4. Active topic & recent operations from session runs
     active_topic = ""
     recent_operations: list[dict[str, Any]] = []
     extracted_reqs: dict[str, Any] = {}
+    last_target_nodes: list[str] = []
 
     runs = (
         db.query(AgentRun)
@@ -153,12 +191,15 @@ def build_conversation_context(
         if r.plan_json:
             try:
                 p_data = json.loads(r.plan_json)
+                if not last_target_nodes and p_data.get("target_nodes"):
+                    last_target_nodes = p_data.get("target_nodes")
                 recent_operations.append({
                     "run_id": r.run_id,
                     "action": p_data.get("action"),
                     "operation": p_data.get("operation", p_data.get("action", "").upper()),
                     "topic": p_data.get("topic", ""),
                     "target_artifact_ids": p_data.get("target_artifact_ids", []),
+                    "target_nodes": p_data.get("target_nodes", []),
                 })
                 if not extracted_reqs and p_data.get("slide_count"):
                     extracted_reqs["slide_count"] = p_data.get("slide_count")
@@ -176,7 +217,7 @@ def build_conversation_context(
         active_art = next((a for a in artifacts_data if a["active"]), artifacts_data[-1])
         active_topic = active_art["title"]
 
-    # 4. Active Template
+    # 5. Active Template
     active_template = None
     try:
         active_ws = db.query(Workspace).filter(Workspace.is_active == True).first()
@@ -190,7 +231,7 @@ def build_conversation_context(
     except Exception as exc:
         logger.debug(f"Could not load active workspace template: {exc}")
 
-    # 5. Cap total character budget at ~3000 chars, dropping oldest messages first
+    # 6. Cap total character budget at ~3000 chars, dropping oldest messages first
     def _context_size() -> int:
         arts_str = json.dumps(artifacts_data)
         msgs_str = json.dumps(recent_messages)
@@ -199,7 +240,7 @@ def build_conversation_context(
     while recent_messages and _context_size() > 3000:
         recent_messages.pop(0)
 
-    # 6. Build Actionable Conversation Summary
+    # 7. Build Actionable Conversation Summary
     summary_parts = []
     if active_topic:
         summary_parts.append(f"Active topic: '{active_topic}'.")
@@ -208,11 +249,16 @@ def build_conversation_context(
             f"Active artifact: ID {active_art_dict.get('artifact_id')} ({active_art_dict.get('kind', '').upper()}) "
             f"v{active_art_dict.get('latest_version')} '{active_art_dict.get('title')}'."
         )
+    if uploaded_files_data:
+        fnames = [f["filename"] for f in uploaded_files_data[:3]]
+        summary_parts.append(f"Uploaded files in session: {', '.join(fnames)}.")
     if active_template:
         summary_parts.append(f"Template: active workspace '{active_template.get('workspace_name')}'.")
     if recent_operations:
         last_op = recent_operations[0]
         summary_parts.append(f"Last operation: {last_op.get('operation')} ('{last_op.get('topic')[:50]}').")
+    if last_target_nodes:
+        summary_parts.append(f"Last targeted nodes: {', '.join(last_target_nodes)}.")
     if extracted_reqs:
         summary_parts.append(f"Requirements: {json.dumps(extracted_reqs)}.")
     conversation_summary = " ".join(summary_parts) if summary_parts else "Fresh conversation session."
@@ -230,6 +276,10 @@ def build_conversation_context(
         current_topic=active_topic,
         extracted_requirements=extracted_reqs,
         unresolved_references=[],
+        uploaded_files=uploaded_files_data,
+        active_artifact_id=active_art_dict.get("artifact_id") if active_art_dict else None,
+        active_version_no=active_version_num,
+        last_target_nodes=last_target_nodes,
     )
 
 

@@ -9,13 +9,14 @@ from pydantic import BaseModel, Field
 
 from app.models.deck_model import DeckModel
 from app.models.document_model import DocumentModel
+from app.models.workbook_model import WorkbookModel
 
 
 class ValidationIssue(BaseModel):
     """An issue identified by deterministic quality validation."""
 
     severity: Literal["error", "warning"]
-    where: str  # e.g., "pptx:slide_3" or "docx:section_2"
+    where: str  # e.g., "pptx:slide_3" or "docx:section_2" or "xlsx:sheet_1"
     message: str
 
 
@@ -37,30 +38,90 @@ NUMBER_OR_PERCENT_REGEX = re.compile(
 )
 
 
+def validate_scope(
+    target_nodes: list[str] | None,
+    actually_changed_nodes: list[str] | None,
+) -> list[ValidationIssue]:
+    """Validate that modifications stayed strictly within planned target nodes."""
+    issues: list[ValidationIssue] = []
+    if not target_nodes:
+        return issues
+
+    target_set = {str(n).lower().strip() for n in target_nodes}
+    changed_set = {str(n).lower().strip() for n in (actually_changed_nodes or [])}
+
+    # If the planned target is appending at the end, adding new nodes at the end is expected
+    if "end" in target_set or "append" in target_set or any("append" in t for t in target_set):
+        return issues
+
+    def _normalize_node(n: str) -> set[str]:
+        cleaned = re.sub(r"[_\-\s]+", " ", n).strip()
+        num_match = re.search(r"\b(\d+)\b", cleaned)
+        res = {n, cleaned}
+        if num_match:
+            res.add(num_match.group(1))
+            res.add(f"slide {num_match.group(1)}")
+            res.add(f"page {num_match.group(1)}")
+        return res
+
+    normalized_targets: set[str] = set()
+    for t in target_set:
+        normalized_targets.update(_normalize_node(t))
+
+    unauthorized: list[str] = []
+    for c in changed_set:
+        c_norms = _normalize_node(c)
+        if not c_norms.intersection(normalized_targets):
+            unauthorized.append(c)
+
+    if unauthorized:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                where="scope:targeted_edit",
+                message=(
+                    f"Scope violation: Planned target nodes were {sorted(target_set)}, "
+                    f"but unapproved nodes were modified: {sorted(unauthorized)}."
+                ),
+            )
+        )
+    return issues
+
+
 def validate_outputs(
     doc_model: DocumentModel | None = None,
     deck_model: DeckModel | None = None,
+    workbook_model: WorkbookModel | None = None,
     expected_slide_count: int = 12,
     valid_source_ids: set[int] | None = None,
     expected_doc_outline: list[str] | None = None,
     follow_template_outline: bool = False,
     min_target_words: int | None = 1200,
+    target_nodes: list[str] | None = None,
+    actually_changed_nodes: list[str] | None = None,
 ) -> ValidationReport:
-    """Perform deterministic quality validation on DocumentModel and DeckModel.
+    """Perform deterministic quality validation on DocumentModel, DeckModel, and WorkbookModel.
 
     Args:
         doc_model: Generated DocumentModel instance.
         deck_model: Generated DeckModel instance.
+        workbook_model: Generated WorkbookModel instance.
         expected_slide_count: Target slide count from Plan.
         valid_source_ids: Set of valid integer source IDs in registry.
         expected_doc_outline: List of expected section headings.
         follow_template_outline: If True, enforce fuzzy match against template headings.
+        target_nodes: Planned target node IDs for scoped edits.
+        actually_changed_nodes: Actually modified node IDs.
 
     Returns:
         ValidationReport containing pass status, score (0-100), and issue list.
     """
     issues: list[ValidationIssue] = []
     valid_sids = valid_source_ids or set()
+
+    # Scope validation
+    if target_nodes:
+        issues.extend(validate_scope(target_nodes, actually_changed_nodes))
 
     # ── 1. Validate PPTX Deck Model ──────────────────────────────────────────
     if deck_model:
@@ -218,6 +279,54 @@ def validate_outputs(
                         severity="error",
                         where=sec_ref,
                         message=f"Section {idx} text contains numbers/dates/metrics ('{b_snip}') but lacks citation source_ids.",
+                    ))
+
+    # ── 3. Validate XLSX Workbook Model ──────────────────────────────────────
+    if workbook_model:
+        sheets = workbook_model.sheets
+        if not sheets:
+            issues.append(ValidationIssue(
+                severity="error",
+                where="xlsx:workbook",
+                message="Workbook has zero sheets; minimum 1 required.",
+            ))
+        for s_idx, sheet in enumerate(sheets, start=1):
+            sheet_ref = f"xlsx:sheet_{s_idx}"
+            if not sheet.name or not sheet.name.strip():
+                issues.append(ValidationIssue(
+                    severity="error",
+                    where=sheet_ref,
+                    message=f"Sheet {s_idx} is missing a valid name.",
+                ))
+            if PLACEHOLDER_REGEX.search(sheet.name):
+                issues.append(ValidationIssue(
+                    severity="error",
+                    where=sheet_ref,
+                    message=f"Placeholder text detected in sheet name '{sheet.name}'.",
+                ))
+            # Check tables
+            for t_idx, table in enumerate(sheet.tables, start=1):
+                if not table.headers:
+                    issues.append(ValidationIssue(
+                        severity="warning",
+                        where=f"{sheet_ref}:table_{t_idx}",
+                        message=f"Table {t_idx} in sheet '{sheet.name}' has no column headers.",
+                    ))
+                for row in table.rows:
+                    for cell in row:
+                        if isinstance(cell, str) and PLACEHOLDER_REGEX.search(cell):
+                            issues.append(ValidationIssue(
+                                severity="error",
+                                where=f"{sheet_ref}:table_{t_idx}",
+                                message=f"Placeholder cell value detected in table {t_idx}.",
+                            ))
+            # Check individual cells and formulas
+            for cell in sheet.cells:
+                if cell.formula and not cell.formula.startswith("="):
+                    issues.append(ValidationIssue(
+                        severity="warning",
+                        where=f"{sheet_ref}:cell_{cell.coordinate}",
+                        message=f"Formula in cell {cell.coordinate} does not start with '=': '{cell.formula}'",
                     ))
 
     # Compute overall score and pass status

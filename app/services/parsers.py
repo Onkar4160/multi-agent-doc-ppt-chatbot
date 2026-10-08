@@ -289,6 +289,66 @@ def parse_image(file_path: str | Path) -> ParsedContent:
     )
 
 
+# ── 5. Parse XLSX ──────────────────────────────────────────────────────────
+
+def parse_xlsx(file_path: str | Path) -> ParsedContent:
+    """Parse a Microsoft Excel (.xlsx) workbook using openpyxl."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"XLSX file not found: {file_path}")
+
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(str(path), data_only=True)
+    except Exception as exc:
+        raise ValueError(f"Corrupt or invalid XLSX file '{path.name}': {exc}") from exc
+
+    blocks: list[ParsedBlock] = []
+    text_parts: list[str] = []
+    sheet_count = len(wb.sheetnames)
+
+    for s_idx, sheet_name in enumerate(wb.sheetnames, start=1):
+        ws = wb[sheet_name]
+        blocks.append(ParsedBlock(
+            type="heading",
+            text=f"Sheet: {sheet_name}",
+            level=1,
+            metadata={"sheet_name": sheet_name, "sheet_index": s_idx},
+        ))
+        text_parts.append(f"=== Sheet: {sheet_name} ===")
+
+        grid: list[list[str]] = []
+        # Extract rows
+        for row in ws.iter_rows(values_only=True):
+            row_vals = [str(val).strip() if val is not None else "" for val in row]
+            if any(row_vals):
+                grid.append(row_vals)
+
+        if grid:
+            blocks.append(ParsedBlock(
+                type="table",
+                text="\n".join(" | ".join(r) for r in grid[:15]),
+                table_data=grid,
+                metadata={"sheet_name": sheet_name, "row_count": len(grid), "col_count": len(grid[0]) if grid else 0},
+            ))
+            for r in grid[:20]:
+                text_parts.append(" | ".join(r))
+
+    wb.close()
+    full_text = "\n".join(text_parts)
+    text_preview = full_text[:1000] + ("..." if len(full_text) > 1000 else "")
+
+    return ParsedContent(
+        file_type="xlsx",
+        blocks=blocks,
+        text_preview=text_preview,
+        page_or_slide_count=sheet_count,
+        is_scanned=False,
+        raw_text=full_text,
+    )
+
+
 # ── Dispatcher ─────────────────────────────────────────────────────────────
 
 def parse_file(file_path: str | Path, ocr_scanned: bool = True) -> ParsedContent:
@@ -300,6 +360,8 @@ def parse_file(file_path: str | Path, ocr_scanned: bool = True) -> ParsedContent
         return parse_docx(path)
     elif ext == ".pptx":
         return parse_pptx(path)
+    elif ext == ".xlsx":
+        return parse_xlsx(path)
     elif ext == ".pdf":
         return parse_pdf(path, ocr_scanned=ocr_scanned)
     elif ext in (".png", ".jpg", ".jpeg"):

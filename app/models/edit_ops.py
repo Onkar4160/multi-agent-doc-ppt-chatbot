@@ -26,6 +26,16 @@ class UpdateSectionOp(BaseModel):
     new_blocks: list[Block] = Field(description="Replacement content blocks.")
 
 
+class UpdateParagraphOp(BaseModel):
+    """Update text of a specific paragraph within a section."""
+
+    type: Literal["update_paragraph"] = "update_paragraph"
+    heading: str | None = Field(default=None, description="Section heading containing the paragraph.")
+    paragraph_index: int = Field(default=1, description="1-based paragraph index to update.")
+    new_text: str = Field(description="New text for the paragraph.")
+    source_ids: list[int] = Field(default_factory=list, description="Citations.")
+
+
 class DeleteSectionOp(BaseModel):
     """Delete a section from a DOCX document."""
 
@@ -88,9 +98,55 @@ class UpdateTitleOp(BaseModel):
     subtitle: str | None = Field(default=None, description="New overarching document/deck subtitle.")
 
 
+from app.models.workbook_model import CellModel, SheetModel, TableModel
+
+
+class AddSheetOp(BaseModel):
+    """Add a new worksheet to an XLSX workbook."""
+
+    type: Literal["add_sheet"] = "add_sheet"
+    sheet: SheetModel = Field(description="The SheetModel object to insert.")
+
+
+class UpdateSheetOp(BaseModel):
+    """Update tables or cells in an existing worksheet."""
+
+    type: Literal["update_sheet"] = "update_sheet"
+    sheet_name: str = Field(description="Target sheet name to update.")
+    tables: list[TableModel] = Field(default_factory=list, description="Updated tables.")
+    cells: list[CellModel] = Field(default_factory=list, description="Updated cells.")
+
+
+class UpdateCellOp(BaseModel):
+    """Update a specific cell value or formula in a worksheet."""
+
+    type: Literal["update_cell"] = "update_cell"
+    sheet_name: str = Field(default="Sheet1", description="Worksheet name.")
+    coordinate: str = Field(description="Cell coordinate (e.g. 'A1', 'B5').")
+    value: Any = Field(default=None, description="New value.")
+    formula: str | None = Field(default=None, description="New formula if applicable.")
+
+
+class AddRowOp(BaseModel):
+    """Append a data row to a table in a worksheet."""
+
+    type: Literal["add_row"] = "add_row"
+    sheet_name: str = Field(default="Sheet1", description="Worksheet name.")
+    table_name: str = Field(default="Table1", description="Target table name.")
+    row_values: list[Any] = Field(description="Data values for the new row.")
+
+
+class DeleteSheetOp(BaseModel):
+    """Delete a worksheet from an XLSX workbook."""
+
+    type: Literal["delete_sheet"] = "delete_sheet"
+    sheet_name: str = Field(description="Name of the worksheet to remove.")
+
+
 Op = Union[
     AddSectionOp,
     UpdateSectionOp,
+    UpdateParagraphOp,
     DeleteSectionOp,
     AddSlideOp,
     UpdateSlideOp,
@@ -99,12 +155,17 @@ Op = Union[
     CondenseDeckOp,
     RefreshWithWebOp,
     UpdateTitleOp,
+    AddSheetOp,
+    UpdateSheetOp,
+    UpdateCellOp,
+    AddRowOp,
+    DeleteSheetOp,
 ]
 
 
 class EditPlan(BaseModel):
     """Structured plan containing target artifact type, edit operations, and change summary."""
 
-    target: Literal["docx", "pptx", "both"] = Field(description="Target artifact format being modified.")
+    target: Literal["docx", "pptx", "xlsx", "both"] = Field(description="Target artifact format being modified.")
     ops: list[Op] = Field(default_factory=list, description="List of granular edit operations.")
     summary: str = Field(description="Human-readable summary of the intended changes.")

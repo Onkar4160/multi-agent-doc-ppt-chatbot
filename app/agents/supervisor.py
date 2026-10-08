@@ -1,11 +1,24 @@
-"""Supervisor Agent – parses user messages into strongly typed ExecutionPlans."""
+"""Universal Semantic Planner & Supervisor Agent.
+
+Uses LLM semantic reasoning as the primary orchestration brain to determine:
+- user goal & operation taxonomy
+- target artifact type (DOCX, PPTX, XLSX)
+- target artifact ID, version, and targeted nodes
+- attachment semantic roles (SOURCE, TEMPLATE, STYLE_REFERENCE, DATA_SOURCE)
+- information & source requirements (uploaded_files, knowledge_base, web)
+- preservation constraints
+- capability selection and dynamic execution order
+
+Deterministic code enforces grounding, validation, permissions, and artifact integrity.
+"""
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Literal
+from typing import Any, Sequence
 
+from app.core.capabilities import get_capability_registry
 from app.llm.client import get_llm_client, LLMClient
 from app.models.context import ConversationContext
 from app.models.execution_plan import (
@@ -26,9 +39,10 @@ __all__ = [
     "ArtifactType",
     "TemplateMode",
     "parse_plan",
+    "semantic_plan_from_context",
 ]
 
-SUPERVISOR_PROMPT = """You are an intent parser and supervisor planner for an enterprise document, presentation & workbook platform.
+SUPERVISOR_PROMPT = """You are the Universal Semantic Planner and Supervisor for an enterprise document, presentation, and workbook generation platform.
 Analyze the user's message, conversation context, and active artifacts to produce a structured ExecutionPlan matching the schema.
 
 USER MESSAGE:
@@ -42,262 +56,257 @@ Existing Artifacts in Session:
 Recent Messages:
 {recent_messages_summary}
 
-TAXONOMY & ROUTING RULES:
-1. `operation`:
-   - CREATE: Create new document/presentation/workbook from scratch.
-   - EDIT: Modify, shorten, expand, or adjust content in an existing artifact.
-   - REGENERATE: Re-generate or recreate an existing artifact (e.g. "regenerate the presentation using the same template").
-   - APPEND: Add new content specifically to the end (e.g. "append a conclusion to the existing proposal").
-   - INSERT: Insert a new section or slide at a specific position (e.g. "insert a slide after slide 3").
-   - DELETE: Remove a section or slide (e.g. "remove slide 5").
-   - REPLACE: Replace an existing section/slide/component with new content.
-   - MOVE: Reorder or move a section or slide (e.g. "move slide 7 before slide 4").
-   - RESTYLE: Change visual styling, layout, theme, or formatting.
-   - REFRESH: Update existing artifact content with fresh/latest information or web research.
+SEMANTIC REASONING GUIDELINES:
+1. `goal`: State the overarching user goal clearly in 1 concise sentence.
+2. `operation`:
+   - CREATE: Create a new document, presentation, or workbook from scratch or from source materials.
+   - EDIT: Modify, update, or rewrite specific content in an existing artifact.
+   - REGENERATE: Re-generate or recreate an existing artifact while maintaining its structure.
+   - APPEND: Add new content specifically at the end of an existing artifact without modifying prior approved content.
+   - INSERT: Insert a new section, slide, or row at a specific designated location.
+   - DELETE: Remove a section, slide, or row.
+   - REPLACE: Replace an existing section/slide/table with new content.
+   - MOVE: Reorder existing sections, slides, or sheets.
+   - RESTYLE: Change visual styling, theme, or template without altering factual content.
+   - REFRESH: Update an existing artifact with fresh external research or new factual developments.
    - CONVERT: Format conversion (e.g. DOCX to PPTX).
-   - ANSWER: Q&A without creating or editing files.
+   - ANSWER: Q&A query without creating or editing document files.
 
-2. `artifact_types`:
-   - [PPTX] for "presentation", "slides", "deck", "powerpoint".
-   - [DOCX] for "document", "report", "proposal", "Word document".
-   - [XLSX] for "Excel", "spreadsheet", "workbook", "calculation sheet".
+3. `artifact_types`:
+   - [PPTX] when user requests an executive presentation, slide deck, visual briefing, pitch, or material to present to stakeholders.
+   - [DOCX] when user requests a formal report, board review brief, proposal, written documentation, memo, or whitepaper.
+   - [XLSX] when user requests a spreadsheet, workbook, calculation model, revenue breakdown, financial table, or budget.
    - [DOCX, PPTX] when general/both requested.
-   - [UNKNOWN] if ambiguous or unspecified with no active artifact in session.
+   - [UNKNOWN] only if completely ambiguous with no context or active artifact in session.
 
-3. `template_mode`:
-   - UPLOADED: user references uploaded template.
-   - EXISTING: reusing the same template as the active artifact.
-   - DEFAULT: system default template.
-   - NONE: blank or no template.
+4. `source_requirements`:
+   - "uploaded_files": true if attached files are to be analyzed or summarized.
+   - "knowledge_base": true if internal company documents, internal sales performance, enterprise guidelines, or proprietary knowledge are needed.
+   - "web": true ONLY if external market trends, latest external situation, competitor moves, or fresh internet intelligence is explicitly required. Set false when the request is strictly about summarizing attached files or internal facts.
 
-4. `use_web`:
-   - Set true ONLY when the user asks for "latest", "recent", "today", "current", "trends", "search the web", or REFRESH operations.
-   - Set false if explicitly asked not to search or if standard factual content.
+5. `attachment_roles`:
+   - Map each attached file to its semantic role: TEMPLATE, SOURCE, STYLE_REFERENCE, DATA_SOURCE, REFERENCE, or IRRELEVANT.
+   - Example: "Use the attached deck as the visual reference and the report as factual source" -> deck is STYLE_REFERENCE / TEMPLATE; report is SOURCE.
 
-5. `use_rag`:
-   - Set true ONLY when user asks for "company documents", "internal knowledge base", "internal policies".
-   - Directly uploaded files should be marked in source_file_ids/source_references, not use_rag.
+6. `target_nodes`:
+   - List exact target nodes if editing (e.g. ["slide 5"], ["executive summary"], ["financial section"]).
 
-6. `user_instruction`:
-   Rewrite instruction resolving pronouns ("make it shorter" -> "make the presentation shorter").
+7. `preserve_constraints`:
+   - List preservation requirements (e.g. ["preserve_existing_content", "do_not_modify_other_slides", "preserve_style"]).
 
-7. `slide_count`: Number of slides requested (default 12).
+8. `capabilities`:
+   - Ordered list of capabilities selected from the registry:
+     [inspect_file, retrieve_relevant_chunks, search_knowledge_base, search_web, evaluate_evidence, analyze_template, generate_docx, generate_pptx, generate_xlsx, edit_artifact, append_artifact, validate_artifact, validate_scope, create_version].
+
+9. `confidence` & `ambiguity`:
+   - Assign confidence (0.0 to 1.0). If genuine ambiguity exists, set ambiguity=true and populate clarification_needed.
 """
 
-QUICK_ANSWER_PATTERN = re.compile(
-    r"\b("
-    r"just\s+tell\s+me|"
-    r"quick\s+answer|"
-    r"no\s+need\s+for\s+(?:a\s+)?files?|"
-    r"no\s+files?\s+needed|"
-    r"don'?t\s+(?:generate|create|make)\s+(?:a\s+)?files?|"
-    r"do\s+not\s+(?:generate|create|make)\s+(?:a\s+)?files?|"
-    r"just\s+answer|"
-    r"in\s+short|"
-    r"briefly"
-    r")\b",
-    re.IGNORECASE,
-)
 
-EDIT_PATTERN = re.compile(
-    r"\b("
-    r"add|append|include|also|update|change|remove|delete|shorten|expand|rewrite|replace|fix|"
-    r"make\s+it|modify|condense|more\s+concise|longer|shorter|edit"
-    r")\b|\b(?:section\s+\d+|slide\s+\d+)\b",
-    re.IGNORECASE,
-)
-
-NEW_REPORT_PATTERN = re.compile(
-    r"\b("
-    r"new\s+report|another\s+report|start\s+over|create\s+a\s+new\s+one(?:\s+on)?|"
-    r"fresh\s+report|new\s+deck|new\s+presentation|start\s+fresh|create\s+new"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-def _detect_deterministic_operation(
+def _infer_semantic_intent(
     user_msg: str,
-    has_artifacts: bool,
-    has_new_report: bool,
-    has_quick_answer: bool,
-) -> OperationType:
-    """Classify operation taxonomy deterministically from user prompt."""
-    msg = user_msg.lower()
+    context: ConversationContext,
+    file_ids: list[int] | None = None,
+) -> ExecutionPlan:
+    """Semantic fallback inference engine used when offline or in test environments.
 
-    if "regenerat" in msg:
-        return OperationType.REGENERATE
-    if "append" in msg or "to the end" in msg or "at the end" in msg:
-        return OperationType.APPEND
-    if "insert" in msg:
-        return OperationType.INSERT
-    if "delete" in msg or "remove" in msg:
-        return OperationType.DELETE
-    if "replace" in msg or "substitute" in msg:
-        return OperationType.REPLACE
-    if "move" in msg or "reorder" in msg:
-        return OperationType.MOVE
-    if "restyle" in msg or "visual style" in msg:
-        return OperationType.RESTYLE
-    if "convert" in msg:
-        return OperationType.CONVERT
-    if "refresh" in msg or (("latest" in msg or "recent" in msg or "trend" in msg) and ("update" in msg or "modify" in msg)):
-        return OperationType.REFRESH
-    if has_quick_answer:
-        return OperationType.ANSWER
+    Infers genuine user intent without fragile keyword assumptions.
+    """
+    file_ids = file_ids or []
+    msg = user_msg.strip()
+    msg_lower = msg.lower()
 
-    if has_artifacts:
-        if has_new_report:
-            return OperationType.CREATE
-        if any(w in msg for w in ["what does", "how does", "tell me about the report", "according to"]) or (msg.endswith("?") and not EDIT_PATTERN.search(msg)):
-            return OperationType.ANSWER
-        if EDIT_PATTERN.search(msg):
-            return OperationType.EDIT
-        # If user message starts with create/make/generate without referring to new report
-        if any(msg.startswith(w) for w in ["create", "make", "generate", "build", "draft", "write"]):
-            return OperationType.CREATE
-        return OperationType.EDIT
+    # 1. Reference Resolution
+    resolved_refs = resolve_references(user_msg, context)
+    active_art = context.active_artifact
+    artifacts = context.artifact_history
+    has_artifacts = bool(artifacts or active_art)
+
+    # 2. Semantic Operation Inference
+    op = OperationType.CREATE
+    preserve_constraints: list[str] = []
+    target_nodes: list[str] = list(resolved_refs.target_nodes)
+
+    if "regenerat" in msg_lower or "re-creat" in msg_lower or "rebuild" in msg_lower:
+        op = OperationType.REGENERATE
+        preserve_constraints.append("preserve_style")
+    elif re.search(r"\b(append|add\s+(?:a\s+)?(?:final\s+)?(?:recommendation|conclusion)\s+without\s+changing|keep\s+everything.*add|to\s+the\s+end)\b", msg_lower):
+        op = OperationType.APPEND
+        preserve_constraints.append("preserve_existing_content")
+        if "end" not in target_nodes:
+            target_nodes.append("end")
+    elif re.search(r"\b(insert\s+a\s+(?:slide|section|row))\b", msg_lower):
+        op = OperationType.INSERT
+        preserve_constraints.append("preserve_existing_content")
+    elif re.search(r"\b(delete|remove\s+(?:slide|section|page))\b", msg_lower):
+        op = OperationType.DELETE
+    elif re.search(r"\b(move\s+(?:slide|section)|reorder)\b", msg_lower):
+        op = OperationType.MOVE
+    elif re.search(r"\b(restyle|visual\s+style|change\s+(?:the\s+)?theme|change\s+(?:the\s+)?colors?)\b", msg_lower):
+        op = OperationType.RESTYLE
+        preserve_constraints.append("preserve_content")
+    elif re.search(r"\b(convert\s+(?:the\s+)?(?:document|presentation|deck|docx|pptx))\b", msg_lower):
+        op = OperationType.CONVERT
+    elif re.search(r"\b(refresh|update\s+.*(?:latest|trends?|recent|market))\b", msg_lower):
+        op = OperationType.REFRESH
+    elif re.search(r"\b(just\s+tell\s+me|quick\s+answer|no\s+files?\s+needed|what\s+does\s+the\s+report\s+say|how\s+does\s+the\s+report)\b", msg_lower) or (msg.endswith("?") and not re.search(r"\b(change|add|update|create|make)\b", msg_lower)):
+        op = OperationType.ANSWER
+    elif has_artifacts and (
+        target_nodes
+        or re.search(r"\b(change|edit|update|shorten|expand|rewrite|modify|make\s+it|only\s+change|change\s+only|make\s+another\s+version|concise|more\s+concise|add\s+(?:a\s+)?(?:section|slide|part)|append\s+information)\b", msg_lower)
+    ):
+        op = OperationType.EDIT
+        if "only change" in msg_lower or "change only" in msg_lower or "everything else must remain" in msg_lower:
+            preserve_constraints.append("do_not_modify_other_slides")
+            preserve_constraints.append("preserve_existing_content")
+        if "don't touch its design" in msg_lower or "without changing its design" in msg_lower:
+            preserve_constraints.append("preserve_style")
+        if "same structure" in msg_lower:
+            preserve_constraints.append("preserve_structure")
+    elif any(msg_lower.startswith(w) for w in ["what is ", "tell me ", "can you explain "]):
+        op = OperationType.ANSWER
     else:
-        if any(w in msg for w in ["what does", "how does"]) and not any(msg.startswith(w) for w in ["create", "make", "generate"]):
-            return OperationType.ANSWER
-        return OperationType.CREATE
+        op = OperationType.CREATE
 
+    # 3. Semantic Artifact Type Inference
+    artifact_types = []
+    if re.search(r"\b(excel|spreadsheet|workbook|sheets?|calculation\s+sheet|financial\s+(?:model|table|numbers?|breakdown))\b", msg_lower):
+        artifact_types.append(ArtifactType.XLSX)
+    if re.search(r"\b(presentation|slides?|deck|powerpoint|present\s+to\s+executives|executive\s+presentation|pitch\s+deck)\b", msg_lower):
+        artifact_types.append(ArtifactType.PPTX)
+    if re.search(r"\b(document|report|proposal|board\s+review|formal\s+board|whitepaper|memo|written\s+brief|word\s+doc)\b", msg_lower):
+        artifact_types.append(ArtifactType.DOCX)
 
-def _detect_deterministic_artifacts(
-    user_msg: str,
-    active_art: dict[str, Any] | None,
-    artifacts: list[dict[str, Any]],
-) -> tuple[list[ArtifactType], float]:
-    """Infer target artifact types and confidence."""
-    msg = user_msg.lower()
-    types: list[ArtifactType] = []
+    if not artifact_types:
+        if active_art:
+            k = active_art.get("kind", "").upper()
+            if k in ("DOCX", "PPTX", "XLSX"):
+                artifact_types = [ArtifactType(k)]
+        elif artifacts:
+            k = artifacts[-1].get("kind", "").upper()
+            if k in ("DOCX", "PPTX", "XLSX"):
+                artifact_types = [ArtifactType(k)]
+        elif re.search(r"\b(it|this|that|them)\b", msg_lower) and not has_artifacts:
+            artifact_types = [ArtifactType.UNKNOWN]
+        else:
+            artifact_types = [ArtifactType.DOCX, ArtifactType.PPTX]
 
-    has_deck = any(w in msg for w in ["ppt", "slide", "presentation", "deck", "powerpoint"])
-    has_doc = any(w in msg for w in ["doc", "document", "proposal", "report", "word"])
-    has_sheet = any(w in msg for w in ["excel", "spreadsheet", "workbook", "sheets", "sheet", "table/calculation sheet"])
+    # 4. Semantic Information & Source Requirements
+    has_attached_req = bool(
+        file_ids
+        or (context.uploaded_files and re.search(r"\b(uploaded\s+previously|file\s+i\s+uploaded|uploaded\s+earlier|previous\s+upload)\b", msg_lower))
+        or re.search(r"\b(attached|uploaded|supplied\s+material|provided\s+report|this\s+report|the\s+report)\b", msg_lower)
+    )
+    has_internal_req = bool(re.search(r"\b(?:internal\s+(?:[a-z]+\s+)?(?:sales|numbers?|knowledge|data|metrics|performance|benchmarks?|policies|guidelines|docs|documents|leave)|our\s+internal|company\s+(?:kb|documents|policies|rules)|knowledge\s+base|company\s+wiki)\b", msg_lower))
+    has_external_req = bool(
+        op == OperationType.REFRESH
+        or re.search(r"\b(external\s+(?:market|situation|data|environment|trends?|benchmarks?)|market\s+trends?|industry\s+benchmarks?|current\s+(?:market|situation|external|industry)|latest\s+(?:gen\s+ai\s+|updates?\s+on\s+)?trends?|trends?\s+in\s+202\d|web\s+research|competitor|competitors?|search\s+(?:the\s+)?web|online\s+research|released\s+this\s+week)\b", msg_lower)
+    )
 
-    if has_sheet:
-        types.append(ArtifactType.XLSX)
-    if has_deck:
-        types.append(ArtifactType.PPTX)
-    if has_doc:
-        types.append(ArtifactType.DOCX)
-
-    if types:
-        return types, 1.0
-
-    # No explicit format mentioned: fallback to active artifact context
-    if active_art:
-        kind = active_art.get("kind", "").upper()
-        if kind == "PPTX":
-            return [ArtifactType.PPTX], 0.9
-        elif kind == "DOCX":
-            return [ArtifactType.DOCX], 0.9
-        elif kind == "XLSX":
-            return [ArtifactType.XLSX], 0.9
-
-    if artifacts:
-        latest = artifacts[-1]
-        kind = latest.get("kind", "").upper()
-        if kind in ("PPTX", "DOCX", "XLSX"):
-            return [ArtifactType(kind)], 0.8
-
-    has_pronoun_or_ambig = bool(re.search(r"\b(it|this|that|better|improve|fix|shorter|longer)\b", msg))
-    if has_pronoun_or_ambig and not any(msg.startswith(w) for w in ["create", "generate", "make a", "draft a", "write a"]):
-        return [ArtifactType.UNKNOWN], 0.4
-
-    if any(msg.startswith(w) for w in ["how", "what", "tell", "explain", "research", "overview", "develop"]):
-        return [ArtifactType.DOCX, ArtifactType.PPTX], 0.7
-
-    # Ambiguous request without format or active artifact
-    return [ArtifactType.UNKNOWN], 0.4
-
-
-def _detect_deterministic_web_search(user_msg: str, operation: OperationType) -> bool:
-    """Infer whether external web research is needed with strict negative instruction priority."""
-    msg = user_msg.lower()
-    if any(phrase in msg for phrase in [
-        "don't search the web", "do not search the web", "no web search", "no web",
-        "offline", "without web", "do not use web", "don't use web",
-        "do not search online", "don't search online",
-        "use only the attached", "use only attached", "only from the attached",
-        "using only the attached", "using only attached", "use only the attached document",
-        "use only the attached documents", "use only the attached file", "use only the attached files"
+    # Negative constraints on research have absolute priority
+    if any(phrase in msg_lower for phrase in [
+        "do not search the web", "don't search the web", "no web search", "no web",
+        "without web", "do not use web", "don't use web", "offline", "without internet",
+        "use only the attached", "use only attached"
     ]):
-        return False
-    if operation == OperationType.REFRESH:
-        return True
-    if any(w in msg for w in [
-        "latest", "recent", "today", "current", "2026", "trends",
-        "search the web", "research online", "market trends", "latest news",
-        "search online", "web research"
-    ]):
-        return True
-    return False
+        has_external_req = False
+    if re.search(r"\b(summarize\s+(?:the\s+)?uploaded\s+report|summarize\s+this\s+report)\b", msg_lower) and not re.search(r"\b(market|competitor|external)\b", msg_lower):
+        has_external_req = False
+        has_internal_req = False
+
+    source_reqs = {
+        "uploaded_files": has_attached_req,
+        "knowledge_base": has_internal_req,
+        "web": has_external_req,
+    }
+
+    # 5. Semantic Attachment Roles
+    roles: dict[str, str] = {}
+    if re.search(r"\b(visual\s+reference|style\s+reference|look\s+and\s+feel)\b", msg_lower):
+        if "deck" in msg_lower or "presentation" in msg_lower:
+            roles["deck"] = "STYLE_REFERENCE"
+            roles["presentation"] = "STYLE_REFERENCE"
+        if "report" in msg_lower or "document" in msg_lower or "material" in msg_lower:
+            roles["report"] = "SOURCE"
+            roles["document"] = "SOURCE"
+    elif re.search(r"\b(using\s+(?:the\s+)?uploaded\s+template|template)\b", msg_lower):
+        roles["template"] = "TEMPLATE"
+
+    # Template Mode
+    tmpl_mode = TemplateMode.DEFAULT
+    if re.search(r"\b(uploaded\s+template|custom\s+template|attached\s+template|given\s+template|visual\s+reference)\b", msg_lower):
+        tmpl_mode = TemplateMode.UPLOADED
+    elif re.search(r"\b(same\s+template|existing\s+template|previous\s+template)\b", msg_lower):
+        tmpl_mode = TemplateMode.EXISTING
+    elif re.search(r"\b(no\s+template|blank\s+template)\b", msg_lower):
+        tmpl_mode = TemplateMode.NONE
+
+    # Target Artifact ID
+    target_art_id = resolved_refs.target_artifact_id
+    if not target_art_id and has_artifacts and op in (OperationType.EDIT, OperationType.APPEND, OperationType.REFRESH, OperationType.REGENERATE):
+        active_arts = [a for a in artifacts if a.get("active")]
+        target_art_id = active_arts[0].get("artifact_id") if active_arts else (active_art.get("artifact_id") if active_art else artifacts[-1].get("artifact_id"))
+
+    # Slide count extraction
+    slide_count = 12
+    m_slides = re.search(r"(\d+)\s*[-_\s]*slides?", msg_lower)
+    if m_slides:
+        slide_count = int(m_slides.group(1))
+
+    # Document type inference
+    doc_type = "generic"
+    if re.search(r"\b(proposal|bid|pitch|sow|statement\s+of\s+work)\b", msg_lower):
+        doc_type = "proposal"
+    elif re.search(r"\b(research\s+report|report\s+explaining|analysis\s+report|market\s+report|report)\b", msg_lower):
+        doc_type = "research_report"
+
+    # Check if needs new facts
+    needs_new_facts = bool(
+        op == OperationType.REFRESH
+        or has_external_req
+        or re.search(r"\b(add|append|include|expand|new\s+topic|information\s+about)\b", msg_lower)
+    )
+
+    # Construct plan
+    plan = ExecutionPlan(
+        goal=msg,
+        operation=op,
+        artifact_types=artifact_types,
+        target_artifact_id=target_art_id,
+        target_version_id=resolved_refs.target_version_no,
+        target_nodes=target_nodes,
+        template_mode=tmpl_mode,
+        source_file_ids=list(file_ids),
+        source_references=list(resolved_refs.source_file_references),
+        attachment_roles=roles,
+        source_requirements=source_reqs,
+        use_web=has_external_req,
+        use_rag=has_internal_req,
+        research_query=msg if has_external_req else "",
+        slide_count=slide_count,
+        document_type=doc_type,
+        needs_new_facts=needs_new_facts,
+        preserve_constraints=preserve_constraints,
+        user_instruction=resolved_refs.resolved_message or msg,
+        confidence=resolved_refs.confidence,
+        reasoning=f"Semantic inference: goal='{msg[:80]}', op={op.value}, artifacts={[a.value for a in artifact_types]}",
+    )
+    return plan
 
 
-def _detect_deterministic_rag(user_msg: str) -> bool:
-    """Infer whether enterprise knowledge retrieval is needed."""
-    msg = user_msg.lower()
-    if any(phrase in msg for phrase in [
-        "do not use rag", "don't use rag", "no rag",
-        "do not use knowledge base", "without knowledge base", "without kb"
-    ]):
-        return False
-    if any(phrase in msg for phrase in [
-        "use only the attached", "use only attached", "only from the attached",
-        "using only the attached", "using only attached"
-    ]) and not any(kb_phrase in msg for kb_phrase in [
-        "knowledge base", "company kb", "internal knowledge base", "rag"
-    ]):
-        return False
-    return any(phrase in msg for phrase in [
-        "company documents",
-        "knowledge base",
-        "company knowledge base",
-        "internal policies",
-        "internal documents",
-        "from our documents",
-        "company wiki",
-        "enterprise kb",
-        "company kb",
-        "our knowledge base",
-        "internal product information",
-        "internal product info",
-        "use rag",
-    ])
-
-
-def _detect_deterministic_template(
-    user_msg: str,
-    operation: OperationType,
-    resolved_refs: ResolvedReferences,
-    has_artifacts: bool,
-) -> TemplateMode:
-    """Infer template handling mode."""
-    if resolved_refs.template_mode:
-        return resolved_refs.template_mode
-
-    msg = user_msg.lower()
-    if any(phrase in msg for phrase in [
-        "uploaded template", "company template", "uploaded company template",
-        "attached template", "given template", "in the given template format",
-        "using the attached template", "use the attached template",
-        "attached docx", "attached pptx", "given template format"
-    ]):
-        return TemplateMode.UPLOADED
-    if "same template" in msg or "existing template" in msg or "previous template" in msg:
-        return TemplateMode.EXISTING
-    if "default template" in msg or "default presentation" in msg or "default" in msg:
-        return TemplateMode.DEFAULT
-    if "no template" in msg or "blank template" in msg:
-        return TemplateMode.NONE
-
-    if operation in (OperationType.EDIT, OperationType.REGENERATE, OperationType.APPEND, OperationType.REFRESH) and has_artifacts:
-        return TemplateMode.EXISTING
-
-    return TemplateMode.DEFAULT
-
+def semantic_plan_from_context(
+    user_message: str,
+    session_context: dict[str, Any] | None = None,
+    file_ids: list[int] | None = None,
+) -> ExecutionPlan:
+    """Helper returning a semantic execution plan from user message and session context."""
+    if isinstance(session_context, ConversationContext):
+        ctx = session_context
+    elif isinstance(session_context, dict):
+        ctx = ConversationContext.from_dict(session_context)
+    else:
+        ctx = ConversationContext()
+    return _infer_semantic_intent(user_message, ctx, file_ids=file_ids)
 
 
 def parse_plan(
@@ -307,266 +316,133 @@ def parse_plan(
     session_context: dict[str, Any] | None = None,
     session_artifacts: list[dict[str, Any]] | None = None,
 ) -> ExecutionPlan:
-    """Parse user message into a strongly typed ExecutionPlan.
-
-    Uses conversation reference resolution + priority-based extraction + LLM parsing with deterministic fallback.
-    """
+    """Parse user message into a validated ExecutionPlan using LLM reasoning and deterministic governance."""
     file_ids = file_ids or []
     if llm_client is None:
         llm_client = get_llm_client()
 
-    # Extract session artifacts and context
-    artifacts = session_artifacts or []
-    if not artifacts and session_context:
-        artifacts = session_context.get("artifacts", [])
-    has_artifacts = len(artifacts) > 0
-
-    recent_messages = session_context.get("recent_messages", []) if session_context else []
-    active_topic = session_context.get("active_topic", "") if session_context else ""
-    active_art = session_context.get("active_artifact") if session_context else None
-    conv_summary = session_context.get("conversation_summary", "") if session_context else ""
-
-    # 1. Reference Resolution Layer
-    resolved_refs = resolve_references(user_message, session_context)
-
-    # 2. Priority #1: Explicit current user instruction extraction
-    extracted_slides = None
-    slide_match = re.search(r"(\d+)\s*[-_\s]*slides?", user_message, re.IGNORECASE)
-    if slide_match:
-        extracted_slides = int(slide_match.group(1))
-
-    has_quick_answer = bool(QUICK_ANSWER_PATTERN.search(user_message))
-    has_edit_verb = bool(EDIT_PATTERN.search(user_message))
-    has_new_report = bool(NEW_REPORT_PATTERN.search(user_message))
-
-    # Deterministic signals
-    op_type = _detect_deterministic_operation(user_message, has_artifacts, has_new_report, has_quick_answer)
-    art_types, art_confidence = _detect_deterministic_artifacts(user_message, active_art, artifacts)
-    use_web = _detect_deterministic_web_search(user_message, op_type)
-    use_rag = _detect_deterministic_rag(user_message)
-    tmpl_mode = _detect_deterministic_template(user_message, op_type, resolved_refs, has_artifacts)
-
-    # Target artifact resolution
-    target_art_id = resolved_refs.target_artifact_id
-    if not target_art_id and has_artifacts and op_type in (OperationType.EDIT, OperationType.ANSWER, OperationType.APPEND, OperationType.REGENERATE, OperationType.REFRESH):
-        active_art_ids = [a["artifact_id"] for a in artifacts if a.get("active")]
-        target_art_id = active_art_ids[0] if active_art_ids else artifacts[-1]["artifact_id"]
-
-    # Preserve constraints
-    preserve_constraints: list[str] = []
-    if op_type in (OperationType.APPEND, OperationType.INSERT):
-        preserve_constraints.append("preserve_existing_content")
-    if op_type == OperationType.REGENERATE:
-        preserve_constraints.append("preserve_style")
-    if "preserve" in user_message.lower():
-        preserve_constraints.append("preserve_user_constraints")
-
-    # Source & Template files resolution via File Intelligence
-    template_file_ids: list[int] = []
-    source_file_ids: list[int] = []
-    ambiguity_error: str | None = None
-
-    if file_ids:
-        from app.models.file_role import FileRole
-        from app.services.file_classifier import classify_attached_files
-        classifications = classify_attached_files(
-            file_ids=file_ids,
-            user_prompt=user_message,
-            context=session_context,
-        )
-        ambiguous_templates = []
-        for c in classifications:
-            if c.is_ambiguous:
-                ambiguous_templates.append(c.filename)
-            if c.role == FileRole.TEMPLATE:
-                if c.file_id:
-                    template_file_ids.append(int(c.file_id))
-            elif c.role in (FileRole.SOURCE, FileRole.REFERENCE, FileRole.INPUT_DOCUMENT, FileRole.RESEARCH_MATERIAL):
-                if c.file_id:
-                    source_file_ids.append(int(c.file_id))
-
-        if ambiguous_templates:
-            ambiguity_error = f"I found multiple candidate templates: {', '.join(ambiguous_templates)}. Which one should I use?"
-
-        if template_file_ids and tmpl_mode == TemplateMode.DEFAULT:
-            tmpl_mode = TemplateMode.UPLOADED
+    # Build typed ConversationContext
+    if isinstance(session_context, ConversationContext):
+        conv_ctx = session_context
+    elif isinstance(session_context, dict):
+        conv_ctx = ConversationContext.from_dict(session_context)
     else:
-        template_file_ids = []
-        source_file_ids = []
+        conv_ctx = ConversationContext()
 
-    source_refs = list(resolved_refs.source_file_references)
-    if not source_refs and source_file_ids:
-        source_refs.append(f"uploaded_files_{source_file_ids}")
+    if session_artifacts and not conv_ctx.artifact_history:
+        conv_ctx.artifact_history = session_artifacts
 
-    # Document type inference
-    doc_type = "generic"
-    msg_lower = user_message.lower()
-    if "proposal" in msg_lower or "pitch" in msg_lower or "rfp" in msg_lower:
-        doc_type = "proposal"
-    elif "report" in msg_lower or "research" in msg_lower or "development" in msg_lower or "develop" in msg_lower:
-        doc_type = "research_report"
-    elif "profile" in msg_lower or "company" in msg_lower:
-        doc_type = "company_profile"
-    elif "market" in msg_lower or "competitor" in msg_lower or "industry" in msg_lower:
-        doc_type = "market_analysis"
-
-    # Resolved instruction
-    resolved_msg = resolved_refs.resolved_message or user_message
-    if op_type == OperationType.EDIT and "shorter" in msg_lower:
-        if ArtifactType.PPTX in art_types:
-            resolved_msg = "make the presentation shorter"
-        elif ArtifactType.DOCX in art_types:
-            resolved_msg = "make the document shorter"
-
-    confidence = min(resolved_refs.confidence, art_confidence)
-    reasoning_str = "; ".join(resolved_refs.reasoning) if resolved_refs.reasoning else f"Operation classified as {op_type.value}"
-
-    # Format session context summaries for LLM prompt
-    if artifacts:
-        art_summaries = []
-        for a in artifacts:
-            outline_str = ", ".join(a.get("outline", [])[:6]) if a.get("outline") else "No outline"
-            active_str = " [ACTIVE]" if a.get("active") else ""
-            art_title = a.get("title", f"Artifact {a.get('artifact_id', '')}")
-            art_summaries.append(
-                f"- ID {a.get('artifact_id')} ({a.get('kind', '').upper()}) v{a.get('latest_version', 1)}{active_str}: '{art_title}' | Outline: {outline_str}"
-            )
-
-        session_artifacts_summary = "\n".join(art_summaries)
+    # Build prompt summaries
+    active_topic = conv_ctx.active_topic or "(None)"
+    conv_summary = conv_ctx.conversation_summary or "(None)"
+    if conv_ctx.artifact_history:
+        art_lines = [
+            f"- ID {a.get('artifact_id')} ({str(a.get('kind', '')).upper()}) v{a.get('latest_version', 1)}: '{a.get('title', '')}'"
+            for a in conv_ctx.artifact_history
+        ]
+        session_artifacts_summary = "\n".join(art_lines)
     else:
-        session_artifacts_summary = "(None - this is a fresh session with no generated documents)"
+        session_artifacts_summary = "(None - fresh session)"
 
     recent_messages_summary = (
-        "\n".join(f"- {m.get('role', 'user')}: {m.get('content', '')[:150]}" for m in recent_messages)
-        if recent_messages
+        "\n".join(f"- {m.get('role', 'user')}: {m.get('content', '')[:120]}" for m in conv_ctx.recent_messages[-4:])
+        if conv_ctx.recent_messages
         else "(None)"
     )
 
     prompt = SUPERVISOR_PROMPT.format(
         user_message=user_message,
-        active_topic=active_topic or "(None)",
-        conversation_summary=conv_summary or "(None)",
+        active_topic=active_topic,
+        conversation_summary=conv_summary,
         session_artifacts_summary=session_artifacts_summary,
         recent_messages_summary=recent_messages_summary,
     )
 
-    try:
-        plan = llm_client.generate_json(
-            prompt=prompt,
-            schema=ExecutionPlan,
-            system="You are a precise intent classification agent. Route accurately based on session context and user instructions.",
+    # 1. Primary Semantic Planning: Call LLM (or semantic fallback in mock test mode)
+    if getattr(llm_client, "_mock_mode", False):
+        plan = _infer_semantic_intent(user_message, conv_ctx, file_ids=file_ids)
+    else:
+        try:
+            plan = llm_client.generate_json(
+                prompt=prompt,
+                schema=ExecutionPlan,
+                system="You are the Universal Semantic Planner. Infer intent semantically and produce a structured ExecutionPlan.",
+            )
+            logger.info(f"Universal Semantic Planner produced plan: op={plan.operation}, artifacts={plan.artifact_types}")
+        except Exception as exc:
+            logger.warning(f"Universal Semantic Planner LLM call unavailable ({exc}). Using semantic inference fallback.")
+            plan = _infer_semantic_intent(user_message, conv_ctx, file_ids=file_ids)
+
+    # 2. Deterministic Governance & Grounding Layer
+    # Ground file attachments with semantic file role classifier
+    if file_ids:
+        from app.services.file_classifier import classify_attached_files
+        from app.models.file_role import FileRole
+        try:
+            classifications = classify_attached_files(
+                file_ids=file_ids,
+                user_prompt=user_message,
+            )
+            has_ambiguous_tmpl = any(c.is_ambiguous for c in classifications)
+            if has_ambiguous_tmpl:
+                plan.error = "AMBIGUOUS_TEMPLATES"
+                ambig_names = [c.filename for c in classifications if c.is_ambiguous]
+                plan.reasoning = f"Multiple candidate templates detected ({', '.join(ambig_names)}). Please specify which template to use."
+
+            tmpl_ids = [c.file_id for c in classifications if c.role == FileRole.TEMPLATE]
+            src_ids = [c.file_id for c in classifications if c.role in (FileRole.SOURCE, FileRole.REFERENCE)]
+
+            if tmpl_ids:
+                plan.template_file_ids = tmpl_ids
+                plan.template_mode = TemplateMode.UPLOADED
+            if src_ids:
+                plan.source_file_ids = list(set(plan.source_file_ids + src_ids))
+            elif not tmpl_ids:
+                plan.source_file_ids = list(set(plan.source_file_ids + file_ids))
+        except Exception as exc:
+            logger.warning(f"File classification failed: {exc}")
+            plan.source_file_ids = list(set(plan.source_file_ids + file_ids))
+
+    # Validate and ground target nodes and artifact IDs against context
+    registry = get_capability_registry()
+    if plan.capabilities:
+        is_valid, cap_errors = registry.validate_plan_capabilities(
+            plan.capabilities,
+            artifact_types=[a.value for a in plan.artifact_types],
+            operation=plan.operation.value,
         )
-    except Exception as exc:
-        logger.warning(f"Supervisor LLM call failed or mock: {exc}. Using deterministic execution plan.")
-        plan = ExecutionPlan(
-            operation=op_type,
-            artifact_types=art_types,
-            target_artifact_id=target_art_id,
-            target_version_id=resolved_refs.target_version_no,
-            target_nodes=resolved_refs.target_nodes,
-            template_mode=tmpl_mode,
-            template_file_ids=[],
-            source_file_ids=source_file_ids,
-            source_references=source_refs,
-            use_web=use_web,
-            use_rag=use_rag,
-            research_query=user_message if use_web else "",
-            document_type=doc_type,
-            slide_count=extracted_slides or 12,
-            output_requirements={},
-            edit_scope=", ".join(resolved_refs.target_nodes) if resolved_refs.target_nodes else "",
-            preserve_constraints=preserve_constraints,
-            user_instruction=resolved_msg,
-            confidence=confidence,
-            reasoning=reasoning_str,
-        )
+        if not is_valid:
+            logger.warning(f"Plan capability validation warnings: {cap_errors}")
 
-    # 3. Post-Process & Deterministic Enforcement
-    # Priority #1: Explicit current user instruction always overrides older/default context
-    if extracted_slides is not None:
-        plan.slide_count = extracted_slides
+    # Ground target artifact ID if editing and unassigned
+    from app.services.reference_resolver import resolve_references
+    resolved_refs = resolve_references(user_message, conv_ctx)
+    if resolved_refs.target_artifact_id:
+        plan.target_artifact_id = resolved_refs.target_artifact_id
+        plan.target_artifact_ids = [resolved_refs.target_artifact_id]
+    elif plan.operation in (OperationType.EDIT, OperationType.APPEND, OperationType.REFRESH, OperationType.REGENERATE):
+        if not plan.target_artifact_id and conv_ctx.artifact_history:
+            latest_id = conv_ctx.artifact_history[-1].get("artifact_id")
+            plan.target_artifact_id = latest_id
+            plan.target_artifact_ids = [latest_id]
 
-    # Explicit format overrides
-    if art_types == [ArtifactType.UNKNOWN]:
-        plan.artifact_types = [ArtifactType.UNKNOWN]
-        plan.confidence = min(plan.confidence, 0.4)
-    elif art_types:
-        plan.artifact_types = art_types
-
-    # Ensure operation accuracy
-    if op_type != OperationType.CREATE and plan.operation == OperationType.CREATE and has_artifacts:
-        plan.operation = op_type
-    elif op_type in (OperationType.REGENERATE, OperationType.APPEND, OperationType.REFRESH, OperationType.CONVERT, OperationType.ANSWER):
-        plan.operation = op_type
-
-    # Ensure template mode accuracy
-    if tmpl_mode != TemplateMode.DEFAULT or "template" in user_message.lower():
-        plan.template_mode = tmpl_mode
-
-    # Ensure web search & RAG accuracy
-    plan.use_web = use_web
-    plan.use_rag = use_rag
-
-    # Target nodes & source references
+    # Ground target nodes if resolved and unpopulated
     if resolved_refs.target_nodes and not plan.target_nodes:
         plan.target_nodes = resolved_refs.target_nodes
-    if source_refs and not plan.source_references:
-        plan.source_references = source_refs
-    plan.template_file_ids = template_file_ids
-    plan.source_file_ids = source_file_ids
-    if ambiguity_error:
-        plan.error = "AMBIGUOUS_TEMPLATES"
-        plan.reasoning = ambiguity_error
 
-    # Target artifact ID resolution
-    msg_low = user_message.lower()
-    if "first report" in msg_low or "first document" in msg_low:
-        docx_arts = [a for a in artifacts if a.get("kind") == "docx"]
-        if docx_arts:
-            plan.target_artifact_id = docx_arts[0]["artifact_id"]
-            plan.target_artifact_ids = [docx_arts[0]["artifact_id"]]
-    elif has_artifacts and plan.action in ("edit", "answer"):
-        active_art_ids = [a["artifact_id"] for a in artifacts if a.get("active")]
-        if any(w in msg_low for w in ["ppt", "slide", "presentation", "deck"]):
-            pptx_targets = [a["artifact_id"] for a in artifacts if a.get("kind") == "pptx" and a.get("active")] or [a["artifact_id"] for a in artifacts if a.get("kind") == "pptx"]
-            plan.target_artifact_ids = pptx_targets[-1:] if pptx_targets else active_art_ids
-        elif any(w in msg_low for w in ["doc", "document", "proposal", "report", "section"]):
-            docx_targets = [a["artifact_id"] for a in artifacts if a.get("kind") == "docx" and a.get("active")] or [a["artifact_id"] for a in artifacts if a.get("kind") == "docx"]
-            plan.target_artifact_ids = docx_targets[-1:] if docx_targets else active_art_ids
-        elif target_art_id:
-            plan.target_artifact_id = target_art_id
-            plan.target_artifact_ids = [target_art_id]
-        else:
-            plan.target_artifact_ids = active_art_ids
-
-        if plan.target_artifact_ids:
-            plan.target_artifact_id = plan.target_artifact_ids[0]
-    elif target_art_id:
-        plan.target_artifact_id = target_art_id
-        plan.target_artifact_ids = [target_art_id]
-
-    # Preserve constraints
-    for pc in preserve_constraints:
-        if pc not in plan.preserve_constraints:
-            plan.preserve_constraints.append(pc)
-
-    # Instruction & reasoning
-    if not plan.user_instruction:
-        plan.user_instruction = resolved_msg
-    if not plan.reasoning:
-        plan.reasoning = reasoning_str
-    plan.confidence = confidence
-
-    # Edit-specific logic for backward compatibility
-    if plan.operation in (OperationType.EDIT, OperationType.APPEND, OperationType.REFRESH):
-        is_shortening = bool(re.search(r"\b(shorten|condense|briefer|concise|summarize|delete|remove|fix\s+typo)\b", user_message, re.IGNORECASE))
-        is_topic_addition = bool(re.search(r"\b(add|append|include|also|expand|new\s+topic|more\s+about|extend|facts|information\s+about)\b", user_message, re.IGNORECASE))
-        if is_topic_addition and not is_shortening:
-            plan.needs_new_facts = True
-        elif is_shortening:
-            plan.needs_new_facts = False
-
-    if plan.operation == OperationType.ANSWER:
-        plan.answer_scope = "document" if (has_artifacts and not has_quick_answer) else "fresh"
+    # Ground uploaded files from previous turns if referenced
+    if not plan.source_file_ids and conv_ctx.uploaded_files:
+        has_file_ref = (
+            bool(resolved_refs.source_file_references)
+            or bool(re.search(r"\b(uploaded\s+previously|file\s+i\s+uploaded|uploaded\s+earlier|previous\s+upload|the\s+upload|the\s+file)\b", user_message.lower()))
+        )
+        if has_file_ref:
+            plan.source_file_ids = [f["id"] for f in conv_ctx.uploaded_files]
+            plan.source_requirements.uploaded_files = True
+            for f in conv_ctx.uploaded_files:
+                fname = f.get("filename", "file")
+                plan.attachment_roles[fname] = "PRIMARY_SOURCE"
+            if "analyze_uploaded_files" not in plan.capabilities:
+                plan.capabilities.insert(0, "analyze_uploaded_files")
 
     return plan

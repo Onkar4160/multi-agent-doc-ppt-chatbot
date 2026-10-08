@@ -45,6 +45,23 @@ class ConversationContext(BaseModel):
     unresolved_references: list[str] = Field(
         default_factory=list, description="Ambiguous or unresolved references flagged during intent analysis."
     )
+    uploaded_files: list[dict[str, Any]] = Field(
+        default_factory=list, description="Uploaded files associated with this conversation session."
+    )
+    active_artifact_id: int | None = Field(
+        default=None, description="Active artifact ID for this conversation."
+    )
+    active_version_no: int | None = Field(
+        default=None, description="Active artifact version number."
+    )
+    last_target_nodes: list[str] = Field(
+        default_factory=list, description="Target nodes from the most recent operation."
+    )
+
+    @property
+    def active_topic(self) -> str:
+        """Alias property for current_topic."""
+        return self.current_topic
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary preserving keys expected by existing services."""
@@ -61,6 +78,10 @@ class ConversationContext(BaseModel):
             "active_template": self.active_template,
             "extracted_requirements": self.extracted_requirements,
             "unresolved_references": self.unresolved_references,
+            "uploaded_files": self.uploaded_files,
+            "active_artifact_id": self.active_artifact_id,
+            "active_version_no": self.active_version_no,
+            "last_target_nodes": self.last_target_nodes,
         }
 
     @classmethod
@@ -68,12 +89,15 @@ class ConversationContext(BaseModel):
         """Construct ConversationContext from dictionary representation."""
         if not data:
             return cls()
+        act_art = data.get("active_artifact")
+        act_id = data.get("active_artifact_id") or (act_art.get("artifact_id") if act_art else None)
+        act_ver = data.get("active_version_no") or data.get("active_version")
         return cls(
             conversation_id=data.get("conversation_id", data.get("session_id", "")),
             recent_messages=data.get("recent_messages", []),
             conversation_summary=data.get("conversation_summary", ""),
-            active_artifact=data.get("active_artifact"),
-            active_version=data.get("active_version"),
+            active_artifact=act_art,
+            active_version=act_ver,
             artifact_history=data.get("artifacts", data.get("artifact_history", [])),
             recent_operations=data.get("recent_operations", []),
             relevant_sources=data.get("relevant_sources", []),
@@ -81,4 +105,8 @@ class ConversationContext(BaseModel):
             current_topic=data.get("active_topic", data.get("current_topic", "")),
             extracted_requirements=data.get("extracted_requirements", {}),
             unresolved_references=data.get("unresolved_references", []),
+            uploaded_files=data.get("uploaded_files", []),
+            active_artifact_id=act_id,
+            active_version_no=act_ver,
+            last_target_nodes=data.get("last_target_nodes", []),
         )

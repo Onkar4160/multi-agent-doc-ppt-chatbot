@@ -232,25 +232,19 @@ class LLMClient:
         s_name = schema.__name__
         if s_name in ("Plan", "ExecutionPlan"):
             msg_match = re.search(r'USER MESSAGE:\s*"(.*?)"', prompt, re.DOTALL)
-            msg_text = msg_match.group(1).lower() if msg_match else prompt.lower()
-            doc_type = "generic"
-            if "proposal" in msg_text or "pitch" in msg_text or "rfp" in msg_text:
-                doc_type = "proposal"
-            elif "report" in msg_text or "research" in msg_text or "development" in msg_text or "develop" in msg_text:
-                doc_type = "research_report"
-            elif "profile" in msg_text or "company" in msg_text:
-                doc_type = "company_profile"
-            elif "market" in msg_text or "competitor" in msg_text or "industry" in msg_text:
-                doc_type = "market_analysis"
-            return schema.model_validate({
-                "operation": "CREATE",
-                "artifact_types": ["DOCX", "PPTX"],
-                "action": "generate",
-                "document_type": doc_type,
-                "outputs": ["docx", "pptx"],
-                "topic": "Sample Topic",
-                "slide_count": 12,
-            })
+            user_msg = msg_match.group(1) if msg_match else prompt
+            try:
+                from app.agents.supervisor import semantic_plan_from_context
+                return semantic_plan_from_context(user_msg)
+            except Exception as e:
+                logger.warning(f"Mock semantic plan delegation failed: {e}")
+                return schema.model_validate({
+                    "operation": "CREATE",
+                    "artifact_types": ["DOCX", "PPTX"],
+                    "action": "generate",
+                    "outputs": ["docx", "pptx"],
+                    "slide_count": 12,
+                })
         try:
             return schema.model_validate({})
         except Exception:

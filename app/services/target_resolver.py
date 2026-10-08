@@ -65,15 +65,15 @@ def resolve_target(
 
     # 2. DeckModel target resolution
     if isinstance(model, DeckModel):
-        return _resolve_deck_target(ref_lower, model)
+        return _resolve_deck_target(ref_lower, model, context=context)
 
     # 3. DocumentModel target resolution
     if isinstance(model, DocumentModel):
-        return _resolve_document_target(ref_lower, model)
+        return _resolve_document_target(ref_lower, model, context=context)
 
     # 4. WorkbookModel target resolution
     if isinstance(model, WorkbookModel):
-        return _resolve_workbook_target(ref_lower, model)
+        return _resolve_workbook_target(ref_lower, model, context=context)
 
     return TargetResolutionResult(
         is_valid=False,
@@ -82,8 +82,21 @@ def resolve_target(
     )
 
 
-def _resolve_deck_target(ref: str, deck: DeckModel) -> TargetResolutionResult:
+def _resolve_deck_target(
+    ref: str, deck: DeckModel, context: dict[str, Any] | None = None
+) -> TargetResolutionResult:
     slide_count = len(deck.slides)
+
+    # Normalize ordinals (e.g. "fifth page" -> "slide 5", "5th slide" -> "slide 5")
+    ord_map = {
+        "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+    }
+    for ord_w, num_v in ord_map.items():
+        if f"{ord_w} slide" in ref or f"{ord_w} page" in ref:
+            ref = re.sub(rf"\b{ord_w}\s+(?:slide|page)\b", f"slide {num_v}", ref)
+    ref = re.sub(r"\b(\d+)(?:st|nd|rd|th)\s+(?:slide|page)\b", r"slide \1", ref)
+    ref = re.sub(r"\bpage\s+(\d+)\b", r"slide \1", ref)
 
     # Match "slide X title" or "title of slide X" or "slide X"
     slide_title_match = re.search(r"\bslide\s+(\d+)\s+(?:title|heading)\b|\btitle\s+(?:of\s+)?slide\s+(\d+)\b", ref)
@@ -144,7 +157,38 @@ def _resolve_deck_target(ref: str, deck: DeckModel) -> TargetResolutionResult:
             resolved_description=f"Slide {idx} ({slide.node_id})",
         )
 
-    # Match "last slide" or "previous slide"
+    # Match "previous slide" or "prior slide"
+    if "previous slide" in ref or "prior slide" in ref or "the previous slide" in ref:
+        if not deck.slides:
+            return TargetResolutionResult(
+                is_valid=False,
+                error_code="INVALID_TARGET",
+                error_message="Presentation contains no slides.",
+            )
+        target_idx = None
+        if context:
+            last_targets = context.get("last_target_nodes") or context.get("target_nodes") or []
+            if isinstance(last_targets, str):
+                last_targets = [last_targets]
+            for lt in last_targets:
+                m = re.search(r"\b(\d+)\b", str(lt))
+                if m:
+                    val = int(m.group(1))
+                    if val > 1:
+                        target_idx = val - 1
+                        break
+        if target_idx is None:
+            target_idx = max(1, len(deck.slides) - 1)
+        slide = deck.slides[target_idx - 1]
+        return TargetResolutionResult(
+            is_valid=True,
+            target_node_id=slide.node_id,
+            target_type="slide",
+            parent_node_id=deck.node_id,
+            resolved_description=f"Previous Slide ({slide.node_id}, slide {target_idx})",
+        )
+
+    # Match "last slide" or "final slide" or "conclusion slide"
     if "last slide" in ref or "final slide" in ref or "conclusion slide" in ref:
         if not deck.slides:
             return TargetResolutionResult(
@@ -189,8 +233,21 @@ def _resolve_deck_target(ref: str, deck: DeckModel) -> TargetResolutionResult:
     )
 
 
-def _resolve_document_target(ref: str, doc: DocumentModel) -> TargetResolutionResult:
+def _resolve_document_target(
+    ref: str, doc: DocumentModel, context: dict[str, Any] | None = None
+) -> TargetResolutionResult:
     sec_count = len(doc.sections)
+
+    # Normalize ordinals (e.g. "fifth page" -> "section 5", "5th page" -> "section 5")
+    ord_map = {
+        "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+    }
+    for ord_w, num_v in ord_map.items():
+        if f"{ord_w} section" in ref or f"{ord_w} page" in ref:
+            ref = re.sub(rf"\b{ord_w}\s+(?:section|page)\b", f"section {num_v}", ref)
+    ref = re.sub(r"\b(\d+)(?:st|nd|rd|th)\s+(?:section|page)\b", r"section \1", ref)
+    ref = re.sub(r"\bpage\s+(\d+)\b", r"section \1", ref)
 
     # Match "section X"
     sec_match = re.search(r"\bsection\s+(\d+)\b", ref)
@@ -318,7 +375,9 @@ def _resolve_document_target(ref: str, doc: DocumentModel) -> TargetResolutionRe
     )
 
 
-def _resolve_workbook_target(ref: str, wb: WorkbookModel) -> TargetResolutionResult:
+def _resolve_workbook_target(
+    ref: str, wb: WorkbookModel, context: dict[str, Any] | None = None
+) -> TargetResolutionResult:
     # Match cell (e.g. "cell A1" or "A1")
     cell_match = re.search(r"\b(?:cell\s+)?([A-Za-z]+[0-9]+)\b", ref)
     if cell_match:
