@@ -38,3 +38,4 @@ httpx>=0.28,<1
 aiofiles>=24.1,<25
 pytest>=8.0,<10
 
+greenlet
