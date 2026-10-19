@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.models.template_profile import is_current_profile
 from app.agents.doc_analyzer import analyze_document
 from app.agents.ppt_analyzer import analyze_presentation
 from app.api.workspaces import _extract_logo_from_templates
@@ -62,8 +63,8 @@ async def init_default_workspace(db: AsyncSession) -> Workspace:
             and ppt_f
             and (Path(doc_f.stored_path).resolve() == docx_path.resolve() or doc_f.stored_path in (str(docx_path), resolved_docx))
             and (Path(ppt_f.stored_path).resolve() == pptx_path.resolve() or ppt_f.stored_path in (str(pptx_path), resolved_pptx))
-            and active_ws.doc_profile_json
-            and active_ws.ppt_profile_json
+            and is_current_profile(active_ws.doc_profile_json)
+            and is_current_profile(active_ws.ppt_profile_json)
         ):
             logger.info("Active workspace matching configured template paths already active (id=%s).", active_ws.id)
             return active_ws
@@ -109,7 +110,7 @@ async def init_default_workspace(db: AsyncSession) -> Workspace:
         )
     )
     existing_ws = existing_ws_query.scalars().first()
-    if existing_ws and existing_ws.doc_profile_json and existing_ws.ppt_profile_json:
+    if existing_ws and is_current_profile(existing_ws.doc_profile_json) and is_current_profile(existing_ws.ppt_profile_json):
         await db.execute(update(Workspace).values(is_active=False))
         existing_ws.is_active = True
         await db.commit()
@@ -181,8 +182,8 @@ def init_default_workspace_sync(db: Session) -> Workspace:
             and ppt_f
             and (Path(doc_f.stored_path).resolve() == docx_path.resolve() or doc_f.stored_path in (str(docx_path), resolved_docx))
             and (Path(ppt_f.stored_path).resolve() == pptx_path.resolve() or ppt_f.stored_path in (str(pptx_path), resolved_pptx))
-            and active_ws.doc_profile_json
-            and active_ws.ppt_profile_json
+            and is_current_profile(active_ws.doc_profile_json)
+            and is_current_profile(active_ws.ppt_profile_json)
         ):
             return active_ws
 
@@ -224,7 +225,7 @@ def init_default_workspace_sync(db: Session) -> Workspace:
         )
         .first()
     )
-    if existing_ws and existing_ws.doc_profile_json and existing_ws.ppt_profile_json:
+    if existing_ws and is_current_profile(existing_ws.doc_profile_json) and is_current_profile(existing_ws.ppt_profile_json):
         db.query(Workspace).update({Workspace.is_active: False})
         existing_ws.is_active = True
         db.commit()

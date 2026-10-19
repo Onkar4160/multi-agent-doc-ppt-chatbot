@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.services.analyzers.template_package import regular_package
 import docx
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -22,6 +23,7 @@ from app.models.document_model import (
     TableBlock,
 )
 from app.models.template_profile import TemplateProfile
+from app.services.docx_finish import add_toc, apply_style_overrides, ensure_page_numbers, in_text, reference_entry
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,40 @@ def _is_block_empty(block: Any) -> bool:
     return False
 
 
+class _Picture:
+    type = "picture"
+
+    def __init__(self, path: str, alt: str) -> None:
+        self.path, self.alt = path, alt
+
+
+class _Caption:
+    type = "caption"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+def _expand_blocks(blocks: list[Any]) -> list[Any]:
+    """Figures become a data table plus a caption until native charts arrive (Stage 9)."""
+    out: list[Any] = []
+    for b in blocks:
+        if getattr(b, "type", "") != "figure":
+            out.append(b)
+            continue
+        chart = b.chart
+        if chart is not None and chart.categories and chart.series:
+            unit = f" ({chart.unit})" if chart.unit else ""
+            rows = [[cat] + [f"{s.values[i]:g}" if i < len(s.values) else "" for s in chart.series]
+                    for i, cat in enumerate(chart.categories)]
+            out.append(TableBlock(headers=[""] + [s.name + unit for s in chart.series], rows=rows,
+                                  source_ids=b.source_ids or chart.source_ids))
+        if b.image is not None and b.image.asset_path and Path(b.image.asset_path).exists():
+            out.append(_Picture(b.image.asset_path, b.image.alt_text or b.image.description))
+        out.append(_Caption(b.caption or (chart.title if chart else "")))
+    return out
+
+
 def _is_section_empty(section: Section) -> bool:
     """Check if a section has zero content (no non-empty blocks)."""
     if not section.blocks:
@@ -75,7 +111,7 @@ def render_docx(
         raise FileNotFoundError(f"DOCX template file not found: {template_path}")
 
     try:
-        doc = docx.Document(str(tmpl_path))
+        doc = docx.Document(str(regular_package(tmpl_path)))  # .dotx templates open as documents
     except Exception as exc:
         raise ValueError(f"Failed to open template DOCX '{tmpl_path.name}': {exc}") from exc
 
@@ -93,10 +129,9 @@ def render_docx(
         return s_name if s_name in available_styles else "Normal"
 
     def format_citations(source_ids: list[int]) -> str:
-        if not source_ids:
-            return ""
-        unique_ids = sorted(list(set(source_ids)))
-        return " " + "".join(f"[{sid}]" for sid in unique_ids)
+        return in_text(source_ids, model.citation_style, sources_map)
+
+    apply_style_overrides(doc, model.style)  # FR-DOCX-5: requested formatting lives in the named styles
 
     all_referenced_source_ids: set[int] = set()
 
@@ -139,7 +174,20 @@ def render_docx(
         run_meta = p_meta.add_run("\n".join(meta_lines))
         run_meta.font.size = Pt(10)
 
+    if model.table_of_contents:
+        add_toc(doc, get_heading_style(1))
+
+    if model.executive_summary.strip():
+        p_es = doc.add_paragraph(style=get_heading_style(1))
+        p_es.paragraph_format.keep_with_next = True
+        p_es.add_run("Executive Summary")
+        p = doc.add_paragraph()
+        p.paragraph_format.line_spacing = 1.15
+        p.paragraph_format.space_after = Pt(6)
+        p.add_run(strip_markdown(model.executive_summary))
+
     # 4. Render Sections
+    figure_no = 0
     for section in model.sections:
         if _is_section_empty(section):
             logger.warning("Skipping empty section '%s' with zero content", section.heading)
@@ -151,7 +199,38 @@ def render_docx(
         p_h.paragraph_format.keep_with_next = True  # Prevent orphaned headings
         p_h.add_run(clean_heading)
 
-        for block in section.blocks:
+        for block in _expand_blocks(section.blocks):
+            if getattr(block, "type", "") == "picture":
+                try:
+                    doc.add_picture(block.path, width=Inches(6.0))
+                    pic = doc.inline_shapes[-1]._inline.docPr
+                    pic.set("descr", block.alt[:500])  # alt text (accessibility)
+                    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                except Exception as exc:
+                    logger.warning("Picture skipped: %s", exc)
+                continue
+            if getattr(block, "type", "") == "caption":
+                figure_no += 1
+                style = "Caption" if "Caption" in available_styles else None
+                p_cap = doc.add_paragraph(style=style) if style else doc.add_paragraph()
+                r_cap = p_cap.add_run(f"Figure {figure_no}: {strip_markdown(block.text)}" if block.text else f"Figure {figure_no}")
+                if not style:
+                    r_cap.italic = True
+                continue
+            if getattr(block, "type", "") in ("quote", "callout"):
+                is_quote = block.type == "quote"
+                style = next((st for st in (("Quote",) if is_quote else ("Intense Quote",)) if st in available_styles), None)
+                p_q = doc.add_paragraph(style=style) if style else doc.add_paragraph()
+                text = f"“{block.text}”" if is_quote else block.text
+                if is_quote and block.attribution:
+                    text += f" ({block.attribution})"
+                r_q = p_q.add_run(strip_markdown(text))
+                if not style:
+                    r_q.italic, r_q.bold = is_quote, not is_quote
+                if block.source_ids:
+                    p_q.add_run(format_citations(block.source_ids)).font.size = Pt(9.5)
+                    all_referenced_source_ids.update(block.source_ids)
+                continue
             if _is_block_empty(block):
                 logger.warning("Skipping empty block in section '%s'", section.heading)
                 continue
@@ -231,6 +310,12 @@ def render_docx(
 
         ref_ids = sorted(list(all_referenced_source_ids))
 
+        if model.citation_style in ("apa", "harvard"):  # alphabetical reference list, no numbers
+            entries = sorted(reference_entry(sid, model.citation_style, sources_map) for sid in ref_ids)
+            for entry in entries:
+                doc.add_paragraph(entry).paragraph_format.left_indent = Inches(0.3)
+            ref_ids = []
+
         for sid in ref_ids:
             s_info = (sources_map or {}).get(sid) or (sources_map or {}).get(str(sid)) or {}
             kind = s_info.get("kind", "web")
@@ -254,6 +339,7 @@ def render_docx(
                     text = f"{title}{acc_str}"
             p_src.add_run(text)
 
+    ensure_page_numbers(doc, strip_markdown(model.title or ""))  # FR-DOCX-3
     doc.save(destination)
     logger.info("Successfully rendered DOCX to %s", destination)
     return destination

@@ -14,13 +14,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import get_settings
+from app.core.errors import UnsupportedFileError
+from app.core.file_safety import ALLOWED_EXTENSIONS as FILE_SAFETY_EXTENSIONS, check_upload
+from app.core.ownership import require_file, username_of, visible
 from app.models.file import UploadedFile
 from app.models.template_profile import TemplateProfileRecord
 from app.models.trace import AgentTrace
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-ALLOWED_EXTENSIONS = {".docx", ".pdf", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXTENSIONS = FILE_SAFETY_EXTENSIONS  # judged by content in app/core/file_safety.py
+
+
+async def _apply_role(db: AsyncSession, existing: UploadedFile, purpose: str | None) -> str:
+    """A re-uploaded file takes the role chosen this time (template / source / dataset); 'auto' keeps the old one."""
+    chosen = (purpose or "").upper()
+    if chosen and chosen != "REFERENCE" and existing.purpose != chosen:
+        existing.purpose = chosen
+        await db.flush()
+    return existing.purpose or "REFERENCE"
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -34,34 +46,12 @@ async def upload_file(
     """Upload a document, presentation, or image template file."""
     settings = get_settings()
 
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename is required",
-        )
-
-    ext = Path(file.filename).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type '{ext}'. Allowed types: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
-        )
-
     content = await file.read()
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File size ({len(content)} bytes) exceeds maximum limit of {settings.max_upload_mb} MB",
-        )
-
-    # Magic bytes check for zip files (.docx, .pptx, and .xlsx)
-    if ext in {".docx", ".pptx", ".xlsx"}:
-        if len(content) < 4 or not (content.startswith(b"PK\x03\x04") or content.startswith(b"PK\x05\x06")):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Corrupt file",
-            )
+    try:
+        ext = check_upload(file.filename or "", content, settings.max_upload_mb)
+    except UnsupportedFileError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+    content_hash = hashlib.sha256(content).hexdigest()
 
     safe_filename = Path(file.filename).name
 
@@ -70,11 +60,11 @@ async def upload_file(
         select(UploadedFile).where(
             UploadedFile.filename == safe_filename,
             UploadedFile.file_size == len(content),
+            visible(UploadedFile.owner, user),
         ).order_by(UploadedFile.id.desc())
     )
     existing_candidates = result.scalars().all()
     if existing_candidates:
-        content_hash = hashlib.sha256(content).hexdigest()
         for existing in existing_candidates:
             existing_path = Path(existing.stored_path)
             if existing_path.exists():
@@ -87,7 +77,7 @@ async def upload_file(
                             "file_size": existing.file_size,
                             "stored_path": existing.stored_path,
                             "session_id": existing.session_id,
-                            "purpose": existing.purpose or "REFERENCE",
+                            "purpose": await _apply_role(db, existing, purpose),
                         }
                 except Exception:
                     pass
@@ -99,7 +89,7 @@ async def upload_file(
                     "file_size": existing.file_size,
                     "stored_path": existing.stored_path,
                     "session_id": existing.session_id,
-                    "purpose": existing.purpose or "REFERENCE",
+                    "purpose": await _apply_role(db, existing, purpose),
                 }
 
     file_uuid = str(uuid.uuid4())
@@ -118,6 +108,8 @@ async def upload_file(
         stored_path=str(saved_path),
         session_id=session_id,
         purpose=purpose.upper() if purpose else "REFERENCE",
+        owner=username_of(user),
+        sha256=content_hash,
     )
     db.add(uploaded_file)
     await db.flush()
@@ -140,7 +132,7 @@ async def list_files(
     user=Depends(get_current_user),
 ):
     """List all uploaded files, optionally filtered by session_id."""
-    stmt = select(UploadedFile)
+    stmt = select(UploadedFile).where(visible(UploadedFile.owner, user))
     if session_id:
         stmt = stmt.where(UploadedFile.session_id == session_id)
     result = await db.execute(stmt.order_by(UploadedFile.id.desc()))
@@ -172,14 +164,7 @@ async def analyze_file(
     user=Depends(get_current_user),
 ):
     """Analyze an uploaded template file and store its TemplateProfile."""
-    result = await db.execute(select(UploadedFile).where(UploadedFile.id == file_id))
-    uploaded_file = result.scalar_one_or_none()
-
-    if uploaded_file is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File with id {file_id} not found",
-        )
+    uploaded_file = await require_file(db, file_id, user)
 
     file_path = Path(uploaded_file.stored_path)
     if not file_path.exists():
@@ -192,13 +177,11 @@ async def analyze_file(
     agent_name = "doc_analyzer"
 
     try:
-        if uploaded_file.file_type == "pptx":
-            from app.agents.ppt_analyzer import analyze_presentation
-            agent_name = "ppt_analyzer"
-            profile = analyze_presentation(file_path, file_id=file_id)
-        else:
-            from app.agents.doc_analyzer import analyze_document
-            profile = analyze_document(file_path, file_id=file_id)
+        from app.services.template_cache import analyze_template
+
+        agent_name = {"pptx": "ppt_analyzer", "potx": "ppt_analyzer", "xlsx": "xlsx_analyzer",
+                      "xltx": "xlsx_analyzer"}.get(uploaded_file.file_type, "doc_analyzer")
+        profile = analyze_template(file_path, file_id=file_id)
 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         profile_json = profile.model_dump_json()
@@ -248,13 +231,14 @@ async def get_file_profile(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Retrieve stored TemplateProfile for an uploaded file."""
+    """Retrieve the latest stored TemplateProfile for an uploaded file."""
+    await require_file(db, file_id, user)
     result = await db.execute(
         select(TemplateProfileRecord)
         .where(TemplateProfileRecord.file_id == file_id)
         .order_by(TemplateProfileRecord.id.desc())
     )
-    rec = result.scalar_one_or_none()
+    rec = result.scalars().first()
 
     if rec is None:
         raise HTTPException(

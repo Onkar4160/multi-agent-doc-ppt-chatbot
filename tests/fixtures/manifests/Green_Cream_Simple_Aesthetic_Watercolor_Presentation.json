@@ -1,0 +1,46 @@
+{
+  "bases": [
+    "cover",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "closing"
+  ],
+  "branding": [],
+  "design_mode": "slides",
+  "file": "Green Cream Simple Aesthetic Watercolor Presentation.pptx",
+  "layouts": {
+    "Blank": "blank",
+    "Comparison": "comparison",
+    "Content with Caption": "image_text",
+    "Picture with Caption": "image_text",
+    "Section Header": "section",
+    "Title Only": "title_only",
+    "Title Slide": "title",
+    "Title and Content": "bullets",
+    "Title and Vertical Text": "bullets",
+    "Two Content": "two_column",
+    "Vertical Title and Text": "bullets"
+  },
+  "roles": {
+    "decorative": 64,
+    "sample_content": 33
+  },
+  "sample_slides": 11,
+  "slide_size_in": [
+    20.0,
+    11.25
+  ],
+  "tokens": {
+    "body_font": "Montserrat",
+    "heading_font": "The Seasons Bold",
+    "primary": "508546",
+    "source": "slides"
+  },
+  "type": "pptx"
+}

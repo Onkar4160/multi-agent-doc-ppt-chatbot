@@ -6,6 +6,7 @@ from app.models.file import UploadedFile
 from app.models.project import Project
 from app.models.run import AgentRun
 from app.models.source import Source
+from app.models.task import ResearchDossierRecord, Task
 from app.models.template_profile import TemplateProfileRecord
 from app.models.trace import AgentTrace
 from app.models.user import User
@@ -30,6 +31,8 @@ __all__ = [
     "ChatSession",
     "Project",
     "Source",
+    "Task",
+    "ResearchDossierRecord",
     "TemplateProfileRecord",
     "User",
     "Workspace",

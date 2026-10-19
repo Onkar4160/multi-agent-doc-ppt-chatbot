@@ -16,7 +16,13 @@ from pptx.util import Inches, Pt
 from PIL import Image, ImageDraw
 
 from app.models.deck_model import BulletItem, DeckModel, SlideModel
-from app.models.template_profile import TemplateProfile
+from app.models.template_profile import SlideDesign, TemplateProfile
+from app.services.analyzers.slide_design import analyze_slide_design
+from app.services.analyzers.template_package import regular_package
+from app.services.ir_compat import legacy_view
+from app.services.renderers.pptx_archetypes import draw_blocks, has_visual, palette_from_profile, with_overrides
+from app.services.renderers.pptx_canvas import Canvas, CanvasLog, Rect
+from app.services.renderers.pptx_clone import render_cloned
 
 logger = logging.getLogger(__name__)
 
@@ -156,23 +162,44 @@ def _apply_light_decoration(slide: Any, prs: pptx.Presentation, accent_rgb: RGBC
 
 def render_pptx(
     deck: DeckModel,
-    template_path: str | Path,
+    template_path: str | Path | None,
     profile: TemplateProfile | None = None,
     out_path: str | Path = "output.pptx",
     sources_map: dict[int, dict[str, Any]] | None = None,
+    photos: dict[int, Any] | None = None,
+    design_hint: str = "",
 ) -> Path:
-    """Render a DeckModel into a PowerPoint (.pptx) file using template slide layouts."""
-    tmpl_path = Path(template_path)
+    """Render a DeckModel into a PowerPoint (.pptx) file using template slide layouts.
+
+    ``photos`` ({index in deck.slides: PhotoAsset}) fill the template's photo frames on designed templates.
+    """
     destination = Path(out_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if template_path is None:  # no template: generated design system (FR-PPTX-3)
+        from app.services.renderers.pptx_generated import render_generated
+
+        deck = legacy_view(deck)
+        cited = {sid for s in deck.slides for sid in s.source_ids} | {
+            sid for s in deck.slides for b in s.bullets + s.left + s.right for sid in b.source_ids} | {
+            sid for s in deck.slides for b in s.blocks for sid in (getattr(b, "source_ids", None) or [])}
+        render_generated(deck, destination, design_hint=design_hint, source_entries=_source_entries(cited, sources_map) if cited else None)
+        return destination
+    tmpl_path = Path(template_path)
 
     if not tmpl_path.exists():
         raise FileNotFoundError(f"PPTX template file not found: {template_path}")
 
+    deck = legacy_view(deck)  # typed blocks shown as bullets/columns until the archetype renderers (Stage 8)
+
     try:
-        prs = pptx.Presentation(tmpl_path)
+        prs = pptx.Presentation(regular_package(tmpl_path))  # .potx templates open as presentations
     except Exception as exc:
         raise ValueError(f"Failed to open template PPTX '{tmpl_path.name}': {exc}") from exc
+
+    # Canva-style templates keep their artwork on the sample slides (layouts are blank): clone those.
+    design = _slide_design(prs, profile)
+    if design is not None and design.design_mode == "slides":
+        return _render_from_sample_slides(prs, design, deck, destination, sources_map, photos)
 
     # 1. Cleanly remove all existing slides (drop relationships and sldId entries)
     for sldId in list(prs.slides._sldIdLst):
@@ -187,6 +214,8 @@ def render_pptx(
     accent_rgb = _hex_to_rgb(accent_hex)
     layouts_info = profile.ppt_style.layouts if (profile and profile.ppt_style) else []
     layout_dec_scores = {l.index: l.decoration_score for l in layouts_info}
+    palette = with_overrides(palette_from_profile(profile), deck.style)
+    visual_log = CanvasLog()
 
     def get_rotated_layout_idx(role: str) -> tuple[int, str]:
         candidates = layout_candidates_by_role.get(role, [(0, "Default Title")])
@@ -230,6 +259,14 @@ def render_pptx(
         # ── SECTION HEADER SLIDE ──
         elif slide_model.role == "section_header":
             _render_section_header_slide(slide, slide_model)
+
+        # ── NATIVE VISUAL (chart, table, KPI, timeline, process, comparison, quote) ──
+        elif has_visual(slide_model.blocks):
+            if slide.shapes.title and slide_model.title:
+                _set_fitted_title(slide.shapes.title, slide_model.title, is_cover=False)
+            _draw_visual_in_body(slide, prs, slide_model, palette, visual_log)
+            for b in slide_model.blocks:
+                all_referenced_source_ids.update(getattr(b, "source_ids", []) or [])
 
         # ── TWO CONTENT SLIDE ──
         elif slide_model.role == "two_content":
@@ -278,29 +315,10 @@ def render_pptx(
         if src_slide.shapes.title:
             _set_fitted_title(src_slide.shapes.title, "Sources & References", is_cover=False)
 
-        ref_ids = sorted(list(all_referenced_source_ids))
-        source_bullets: list[BulletItem] = []
-
-        for sid in ref_ids:
-            s_info = (sources_map or {}).get(sid) or (sources_map or {}).get(str(sid)) or {}
-            kind = s_info.get("kind", "web")
-            title = s_info.get("title", "")
-            url_or_fn = s_info.get("url_or_filename") or s_info.get("url", "")
-            accessed = s_info.get("accessed_at", "")
-
-            if kind == "kb":
-                text = f"{title} - {url_or_fn}" if (title and url_or_fn and title != url_or_fn) else (title or url_or_fn or f"Document {sid}")
-            else:
-                acc_str = f" (accessed {accessed})" if accessed else ""
-                if title and url_or_fn:
-                    text = f"{title} - {url_or_fn}{acc_str}"
-                elif url_or_fn:
-                    text = f"{url_or_fn}{acc_str}"
-                else:
-                    text = f"{title}{acc_str}"
-
-            txt = f"[{sid}] {text}"
-            source_bullets.append(BulletItem(text=txt, level=0, source_ids=[sid]))
+        source_bullets = [
+            BulletItem(text=txt, level=0, source_ids=[sid])
+            for sid, txt in zip(sorted(all_referenced_source_ids), _source_entries(all_referenced_source_ids, sources_map))
+        ]
 
         _fill_content_placeholder(src_slide, source_bullets, set())
         _process_picture_placeholders(src_slide)
@@ -320,6 +338,65 @@ def render_pptx(
 
     prs.save(destination)
     logger.info("Successfully rendered PPTX deck with %d slides to %s", len(prs.slides), destination)
+    return destination
+
+
+def _source_entries(source_ids: set[int], sources_map: dict[int, dict[str, Any]] | None) -> list[str]:
+    """'[n] Title - url (accessed ...)' lines for the Sources slide, in source-id order."""
+    entries: list[str] = []
+    for sid in sorted(source_ids):
+        s_info = (sources_map or {}).get(sid) or (sources_map or {}).get(str(sid)) or {}
+        kind = s_info.get("kind", "web")
+        title = s_info.get("title", "")
+        url_or_fn = s_info.get("url_or_filename") or s_info.get("url", "")
+        accessed = s_info.get("accessed_at", "")
+
+        if kind == "kb":
+            text = f"{title} - {url_or_fn}" if (title and url_or_fn and title != url_or_fn) else (title or url_or_fn or f"Document {sid}")
+        else:
+            acc_str = f" (accessed {accessed})" if accessed else ""
+            if title and url_or_fn:
+                text = f"{title} - {url_or_fn}{acc_str}"
+            elif url_or_fn:
+                text = f"{url_or_fn}{acc_str}"
+            else:
+                text = f"{title}{acc_str}"
+        entries.append(f"[{sid}] {text}")
+    return entries
+
+
+# ── Sample-slide (clone) rendering ─────────────────────────────────────────
+
+def _slide_design(prs: pptx.Presentation, profile: TemplateProfile | None) -> SlideDesign | None:
+    """Slide design from the profile, or analysed now (profiles cached before it existed lack it)."""
+    if profile and profile.ppt_style and profile.ppt_style.slide_design is not None:
+        return profile.ppt_style.slide_design
+    try:
+        return analyze_slide_design(prs)
+    except Exception as exc:  # analysis problems fall back to the layout path
+        logger.warning("Slide design analysis failed; using layouts: %s", exc)
+        return None
+
+
+def _render_from_sample_slides(
+    prs: pptx.Presentation,
+    design: SlideDesign,
+    deck: DeckModel,
+    destination: Path,
+    sources_map: dict[int, dict[str, Any]] | None,
+    photos: dict[int, Any] | None = None,
+) -> Path:
+    kept = [i for i, s in enumerate(deck.slides) if not _is_slide_empty(s)]
+    slides = [deck.slides[i] for i in kept]
+    slide_photos = [(photos or {}).get(i) for i in kept]
+    cited: set[int] = set()
+    for s in slides:
+        cited.update(s.source_ids)
+        for item in s.bullets[:6] + s.left[:6] + s.right[:6]:
+            cited.update(item.source_ids)
+    render_cloned(prs, design, deck, slides, _source_entries(cited, sources_map) if cited else [], slide_photos)
+    prs.save(destination)
+    logger.info("Rendered PPTX deck with %d slides from template sample slides to %s", len(prs.slides), destination)
     return destination
 
 
@@ -401,6 +478,29 @@ def _set_fitted_title(shape: Any, title_text: str, is_cover: bool = False) -> No
 
 
 # ── Body Content & Bullet Fit Control ──────────────────────────────────────
+
+def _draw_visual_in_body(slide: Any, prs: pptx.Presentation, model: SlideModel, palette: Any, log: Any) -> None:
+    """Replace the layout's body placeholders with native components drawn in the area they covered."""
+    bodies = [
+        sh for sh in slide.placeholders
+        if sh != slide.shapes.title and sh.placeholder_format.type != pptx.enum.shapes.PP_PLACEHOLDER.PICTURE
+        and sh.width and sh.height
+    ]
+    sw, sh_ = prs.slide_width / 914400, prs.slide_height / 914400
+    if bodies:
+        x0 = min(b.left for b in bodies) / 914400
+        y0 = min(b.top for b in bodies) / 914400
+        x1 = max(b.left + b.width for b in bodies) / 914400
+        y1 = max(b.top + b.height for b in bodies) / 914400
+        region = Rect(x0, y0, x1 - x0, y1 - y0)
+    else:
+        title = slide.shapes.title
+        top = (title.top + title.height) / 914400 + 0.2 if title is not None else sh_ * 0.22
+        region = Rect(sw * 0.07, top, sw * 0.86, sh_ * 0.92 - top)
+    for b in bodies:
+        b._element.getparent().remove(b._element)
+    draw_blocks(Canvas(slide, log, scale=sh_ / 7.5), region, model.blocks, palette)
+
 
 def _fill_content_placeholder(slide: Any, bullets: list[BulletItem], cited_set: set[int]) -> None:
     """Fill body content placeholder with fitted bullets (min font size 16pt)."""

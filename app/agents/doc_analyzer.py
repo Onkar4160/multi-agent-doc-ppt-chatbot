@@ -11,11 +11,14 @@ from pydantic import BaseModel, Field
 
 from app.llm.client import get_llm_client, LLMClient
 from app.models.template_profile import (
+    ANALYZER_VERSION,
     DocStyleProfile,
     FontInfo,
     TemplateProfile,
     ToneProfile,
 )
+from app.services.analyzers.docx_manifest import docx_manifest, docx_tokens
+from app.services.analyzers.template_package import file_sha256, regular_package
 from app.services.parsers import parse_file, ParsedContent
 
 logger = logging.getLogger(__name__)
@@ -52,9 +55,10 @@ def analyze_document(
     Uses python-docx / parsers to extract real visual styles without LLM calls.
     Makes at most ONE LLM call to derive ToneProfile and content_summary.
     """
-    path = Path(file_path)
-    if not path.exists():
+    original = Path(file_path)
+    if not original.exists():
         raise FileNotFoundError(f"Document file not found: {file_path}")
+    path = regular_package(original)  # .dotx opens as a document
 
     # 1. Parse document structure
     parsed: ParsedContent = parse_file(path)
@@ -93,12 +97,15 @@ def analyze_document(
     return TemplateProfile(
         file_id=file_id,
         file_type=parsed.file_type,
-        source_name=path.name,
+        source_name=original.name,
         doc_style=doc_style,
         ppt_style=None,
         tone=tone,
         content_summary=content_summary,
         text_preview=parsed.text_preview,
+        analyzer_version=ANALYZER_VERSION,
+        design_tokens=docx_tokens(doc_style.manifest) if doc_style.manifest else None,
+        sha256=file_sha256(original),
     )
 
 
@@ -114,11 +121,15 @@ def _extract_doc_style(path: Path, parsed: ParsedContent) -> DocStyleProfile:
     footer_text = None
     palette_set: set[str] = set()
     outline: list[dict[str, Any]] = []
+    manifest = None
 
     if path.suffix.lower() == ".docx":
         try:
             doc = docx.Document(path)
+            manifest = docx_manifest(doc)
             section = doc.sections[0]
+            width = section.page_width.inches if section.page_width else 0
+            page_size = "Letter" if abs(width - 8.5) < 0.1 or abs(width - 11) < 0.1 else "A4"
             margins = {
                 "top": round(section.top_margin.inches, 2),
                 "bottom": round(section.bottom_margin.inches, 2),
@@ -164,4 +175,5 @@ def _extract_doc_style(path: Path, parsed: ParsedContent) -> DocStyleProfile:
         footer_text=footer_text,
         palette=palette,
         outline=outline,
+        manifest=manifest,
     )

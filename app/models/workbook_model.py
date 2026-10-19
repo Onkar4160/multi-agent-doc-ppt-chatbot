@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
+from app.models.style import StyleOverrides
+
 
 class CellModel(BaseModel):
     """A single cell in a worksheet."""
@@ -42,14 +44,32 @@ class SheetModel(BaseModel):
 
     node_id: str | None = None
     name: str = Field(default="Sheet1", description="Sheet tab name.")
+    role: Literal["readme", "assumptions", "data", "calculations", "report", "dashboard", "sources", "other"] = "other"
     cells: list[CellModel] = Field(default_factory=list, description="Explicit cell overrides.")
     tables: list[TableModel] = Field(default_factory=list, description="Structured tables on this sheet.")
     charts: list[ChartModel] = Field(default_factory=list, description="Embedded charts on this sheet.")
 
 
+class NamedRange(BaseModel):
+    name: str
+    ref: str = Field(description="e.g. 'Assumptions!$B$2'")
+
+
+class ExpectedCheck(BaseModel):
+    """A value the finished workbook must reproduce (verified by recalculation in Stage 10)."""
+    ref: str = Field(description="Cell, e.g. 'Calculations!B8'")
+    expected: float
+    tolerance: float = 0.01
+    description: str = ""
+
+
 class WorkbookModel(BaseModel):
     """Root structured content model for spreadsheet workbook generation."""
 
+    schema_version: int = 1
     node_id: str | None = None
     title: str = Field(default="Workbook", description="Workbook title.")
     sheets: list[SheetModel] = Field(default_factory=list, description="Worksheets in this workbook.")
+    named_ranges: list[NamedRange] = Field(default_factory=list)
+    style: StyleOverrides | None = None
+    checks: list[ExpectedCheck] = Field(default_factory=list)

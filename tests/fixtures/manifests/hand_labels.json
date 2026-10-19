@@ -1,0 +1,27 @@
+{
+  "_note": "Element roles and layout archetypes labelled by inspecting the sample templates (shape dumps and renders), independently of the classifier. Keys: slide number (1-based) -> shape index -> role.",
+  "roles": {
+    "Company_Template.pptx": {
+      "1": {"0": "sample_content", "1": "sample_content", "2": "branding", "3": "sample_content", "4": "placeholder", "5": "decorative"},
+      "2": {"0": "placeholder", "1": "sample_content", "2": "sample_content", "3": "decorative", "4": "decorative", "5": "structural", "6": "structural", "7": "decorative"},
+      "3": {"0": "structural", "1": "structural", "2": "sample_content", "3": "sample_content", "4": "placeholder"}
+    },
+    "Green Cream Simple Aesthetic Watercolor Presentation.pptx": {
+      "1": {"0": "decorative", "1": "decorative", "2": "sample_content", "3": "sample_content", "4": "decorative"},
+      "2": {"0": "decorative", "1": "decorative", "2": "decorative", "3": "sample_content", "4": "sample_content", "5": "decorative"},
+      "3": {"0": "decorative", "1": "decorative", "5": "sample_content", "6": "sample_content", "9": "sample_content", "12": "decorative"}
+    },
+    "presentation_Template.pptx": {
+      "1": {"0": "decorative", "1": "decorative", "2": "decorative", "10": "decorative", "11": "sample_content", "12": "sample_content"},
+      "2": {"7": "sample_content", "8": "decorative", "15": "decorative", "21": "sample_content"},
+      "3": {"1": "decorative", "7": "sample_content", "8": "sample_content", "12": "sample_content"}
+    }
+  },
+  "layout_archetypes": {
+    "Company_Template.pptx": {
+      "1_Title Slide": "title", "Quote Slide": "quote", "Timeline": "timeline", "Thank You": "closing",
+      "Title and Content": "bullets", "Section Header": "section", "Two Content": "two_column", "Comparison": "comparison",
+      "Title Only": "title_only", "Blank": "blank", "Picture with Caption": "image_text", "Title Slide": "title"
+    }
+  }
+}

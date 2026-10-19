@@ -15,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.ownership import require_artifact, require_session, session_visible, username_of
+from app.core.security import get_user_from_header_or_token
 from app.core.config import get_settings
 from app.agents.doc_analyzer import analyze_document
 from app.agents.doc_generator import generate_document_model
@@ -84,6 +86,7 @@ async def generate_artifact(
         used_sids = [sid for sec in doc_model.sections for b in sec.blocks for sid in getattr(b, "source_ids", [])]
 
         artifact = await create_artifact(db, "docx", doc_model.title)
+        artifact.owner = username_of(user)
         ver_rec = await add_version(
             db,
             artifact_id=artifact.id,
@@ -133,6 +136,7 @@ async def generate_artifact(
         used_sids = [sid for sl in deck_model.slides for sid in sl.source_ids]
 
         artifact = await create_artifact(db, "pptx", deck_model.title)
+        artifact.owner = username_of(user)
         ver_rec = await add_version(
             db,
             artifact_id=artifact.id,
@@ -174,15 +178,13 @@ async def get_artifacts(
 ):
     """List all generated artifacts, optionally filtered by session_id."""
     if session_id:
-        from app.models.chat import ChatSession
-        sess_stmt = select(ChatSession).where(ChatSession.session_id == session_id)
-        sess_res = await db.execute(sess_stmt)
-        if not sess_res.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+        await require_session(db, session_id, user)
 
     artifacts = await list_artifacts(db, session_id=session_id)
     output = []
     for a in artifacts:
+        if a.owner not in (None, username_of(user)) or not await session_visible(db, a.session_id, user):
+            continue
         latest = await get_version(db, a.id)
         output.append({
             "id": a.id,
@@ -203,6 +205,7 @@ async def get_artifact_versions(
     user=Depends(get_current_user),
 ):
     """List version history for a specific artifact."""
+    await require_artifact(db, id, user)
     versions = await list_versions(db, id)
     output = []
     for v in versions:
@@ -212,6 +215,7 @@ async def get_artifact_versions(
             "file_type": v.file_type,
             "change_summary": v.change_summary,
             "diff": diff_val,
+            "quality": json.loads(v.quality_json) if getattr(v, "quality_json", None) else None,
             "created_at": v.created_at.isoformat() if v.created_at else None,
             "download_url": f"/artifacts/{id}/download?version={v.version_no}",
         })
@@ -226,6 +230,7 @@ async def get_artifact_version_detail(
     user=Depends(get_current_user),
 ):
     """Get detailed metadata and model snapshot for a specific version."""
+    await require_artifact(db, id, user)
     ver = await get_version(db, id, version_no=n)
     if not ver:
         raise HTTPException(
@@ -244,6 +249,7 @@ async def get_artifact_version_detail(
         "change_summary": ver.change_summary,
         "diff": diff_val,
         "source_ids": sources_val,
+        "quality": json.loads(ver.quality_json) if getattr(ver, "quality_json", None) else None,  # FR-VAL-3
         "created_at": ver.created_at.isoformat() if ver.created_at else None,
         "download_url": f"/artifacts/{id}/download?version={ver.version_no}",
         "model_json": model_obj,
@@ -259,9 +265,11 @@ class EditArtifactRequest(BaseModel):
 async def edit_artifact_endpoint(
     id: int,
     body: EditArtifactRequest,
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Conversational edit on an existing artifact."""
+    await require_artifact(db, id, user)
     from app.agents.editor import edit_artifact
     from app.core.database import get_sync_session
 
@@ -294,6 +302,7 @@ async def revert_artifact_endpoint(
     user=Depends(get_current_user),
 ):
     """Revert artifact to an older version by creating a NEW version snapshot."""
+    await require_artifact(db, id, user)
     target_ver = await get_version(db, id, version_no=body.version)
     if not target_ver:
         raise HTTPException(
@@ -334,9 +343,11 @@ class ConvertArtifactRequest(BaseModel):
 async def convert_artifact_endpoint(
     id: int,
     body: ConvertArtifactRequest,
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Convert artifact (docx -> pptx or pptx -> docx) into a new artifact."""
+    await require_artifact(db, id, user)
     from app.agents.converter import convert_artifact
     from app.core.database import get_sync_session
 
@@ -357,13 +368,45 @@ async def convert_artifact_endpoint(
         sync_db.close()
 
 
+@router.get("/{id}/previews")
+async def artifact_previews(
+    id: int,
+    version: int | None = Query(None),
+    width: int = Query(640, ge=160, le=1600),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Slide thumbnails (base64 PNG) of a PPTX artifact version, rendered once and cached on disk."""
+    import base64
+
+    from app.services.renderers.pptx_preview import render_previews
+
+    await require_artifact(db, id, user)
+    ver_rec = await get_version(db, id, version_no=version)
+    if not ver_rec or not Path(ver_rec.file_path).exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Version {version or 'latest'} of artifact {id} not found")
+    if ver_rec.file_type != "pptx":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slide previews exist only for presentations")
+    cache = Path(get_settings().storage_dir) / "previews" / f"{id}_v{ver_rec.version_no}_{width}"
+    paths = sorted(cache.glob("slide-*.png")) if cache.exists() else []
+    if not paths:
+        paths = render_previews(Path(ver_rec.file_path), cache, width_px=width, mark_overflow=False)
+    return {
+        "artifact_id": id,
+        "version": ver_rec.version_no,
+        "slides": [base64.b64encode(p.read_bytes()).decode("ascii") for p in paths],
+    }
+
+
 @router.get("/{id}/download")
 async def download_artifact_version(
     id: int,
     version: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(get_user_from_header_or_token),
 ):
-    """Download the rendered DOCX or PPTX file for an artifact version."""
+    """Download the rendered file of an artifact version (JWT in the header, or ``?token=`` for browser links)."""
+    await require_artifact(db, id, user)
     ver_rec = await get_version(db, id, version_no=version)
     if not ver_rec:
         raise HTTPException(

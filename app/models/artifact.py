@@ -19,6 +19,8 @@ class Artifact(Base, TimestampMixin):
     artifact_type: Mapped[str] = mapped_column(String(10), nullable=False)  # docx | pptx
     session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     run_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    owner: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)  # username (ADR-014)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class ArtifactVersion(Base, TimestampMixin):
@@ -40,3 +42,5 @@ class ArtifactVersion(Base, TimestampMixin):
     source_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of Source ids
     sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON map of {id: {title, url_or_filename, kind, accessed_at}}
     diff_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list/dict of diff changes
+    quality_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # QualityReport (DATA_MODELS §9.2)
+    dossier_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # research_dossiers.id

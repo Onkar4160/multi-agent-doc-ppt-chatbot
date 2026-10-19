@@ -17,6 +17,7 @@ class ChatSession(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)  # username (ADR-014)
 
 
 class ChatMessage(Base, TimestampMixin):

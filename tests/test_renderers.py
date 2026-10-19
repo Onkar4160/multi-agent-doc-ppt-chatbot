@@ -126,9 +126,9 @@ def test_pptx_renderer_quality_and_font_minimums(tmp_path: Path):
     # 1. Assert slide count (12 deck slides + 1 Sources slide = 13 slides total)
     assert len(prs.slides) == 13
 
-    # 2. Assert layout choices used across 12 slides are NOT all the same
-    used_layout_names = {s.slide_layout.name for s in prs.slides}
-    assert len(used_layout_names) > 1, f"Layouts used should be varied, found only: {used_layout_names}"
+    # 2. The template's design lives on its sample slides: designs used across the deck are NOT all the same
+    designs = {tuple(sorted(sh.name for sh in s.shapes if not sh.name.startswith(("content:", "decor:")))) for s in prs.slides}
+    assert len(designs) > 1, f"Slide designs should be varied, found only: {designs}"
 
     # 3. Assert no empty text placeholders left on any slide
     for slide_idx, slide in enumerate(prs.slides, start=1):
@@ -138,16 +138,17 @@ def test_pptx_renderer_quality_and_font_minimums(tmp_path: Path):
                 assert len(txt) > 0, f"Slide {slide_idx} has empty text placeholder '{shape.name}'"
 
     # 4. Assert font sizes are >= minimums
-    cover_slide = prs.slides[0]
-    cover_title_p = cover_slide.shapes.title.text_frame.paragraphs[0]
-    assert cover_title_p.font.size.pt >= 28.0, f"Cover title font size {cover_title_p.font.size.pt} is below min 28pt"
+    cover_title = next(sh for sh in prs.slides[0].shapes if sh.name == "content:title")
+    cover_size = cover_title.text_frame.paragraphs[0].runs[0].font.size.pt
+    assert cover_size >= 28.0, f"Cover title font size {cover_size} is below min 28pt"
 
     for slide_idx, slide in enumerate(list(prs.slides)[1:], start=2):
         for shape in slide.shapes:
-            if shape.has_text_frame:
+            if shape.has_text_frame and shape.name.startswith("content:"):
                 for p in shape.text_frame.paragraphs:
-                    if p.font.size:
-                        assert p.font.size.pt >= 14.0, f"Slide {slide_idx} paragraph font size {p.font.size.pt} is below min 14pt"
+                    for run in p.runs:
+                        if run.font.size:
+                            assert run.font.size.pt >= 14.0, f"Slide {slide_idx} font size {run.font.size.pt} is below min 14pt"
 
 
 def test_strip_markdown_helper():
@@ -252,8 +253,17 @@ def test_auto_decoration_applied_when_dec_score_zero(tmp_path: Path):
         ],
     )
 
+    # Without sample slides the template's design is on its layouts, so the layout path renders it.
+    layouts_only = tmp_path / "layouts_only.pptx"
+    tmpl = pptx.Presentation(PPTX_TEMPLATE)
+    for sld_id in list(tmpl.slides._sldIdLst):
+        tmpl.part.drop_rel(sld_id.rId)
+        tmpl.slides._sldIdLst.remove(sld_id)
+    tmpl.save(layouts_only)
+    profile = analyze_presentation(layouts_only)
+
     out_file = tmp_path / "test_auto_dec.pptx"
-    render_pptx(deck_model, PPTX_TEMPLATE, profile=profile, out_path=out_file)
+    render_pptx(deck_model, layouts_only, profile=profile, out_path=out_file)
     assert out_file.exists()
 
     prs = pptx.Presentation(out_file)

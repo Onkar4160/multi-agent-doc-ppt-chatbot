@@ -432,6 +432,7 @@ def edit_artifact(
     old_model_json = ver_rec.model_json
     ver_id = ver_rec.id
     ver_no = ver_rec.version_no
+    old_file_path = ver_rec.file_path
     art_type = str(artifact.artifact_type)
     art_title = str(artifact.title)
 
@@ -684,16 +685,28 @@ def edit_artifact(
     if is_topic_addition and not fresh_pack:
         extra_prompt_err = "\nCRITICAL: No sources found for this topic. You MUST write NO specific facts (no numbers, dates, version numbers, names) and attach NO citations (source_ids=[])."
 
-    edit_plan = _generate_edit_plan(
-        instruction=instruction,
-        artifact_type=art_type,
-        model=old_model,
-        profile=profile,
-        llm_client=llm,
-        evidence_pack=fresh_pack,
-        active_topic=active_topic,
-        extra_error_context=extra_prompt_err,
-    )
+    # A formatting-only request is applied to the model's styles without an LLM call (FR-DOCX-5, ADR-033).
+    from app.agents.interpreter import parse_style_changes
+    from app.models.style import StyleOverrides
+    from app.services.edit_guard import is_pure_restyle, regression
+
+    style_changes = parse_style_changes(instruction)
+    restyle: StyleOverrides | None = None
+    if is_pure_restyle(instruction, style_changes):
+        restyle = (old_model.style or StyleOverrides()).model_copy()
+        applied = restyle.apply(style_changes)
+        edit_plan = EditPlan(target=art_type, ops=[], summary="Restyled: " + "; ".join(applied))
+    else:
+        edit_plan = _generate_edit_plan(
+            instruction=instruction,
+            artifact_type=art_type,
+            model=old_model,
+            profile=profile,
+            llm_client=llm,
+            evidence_pack=fresh_pack,
+            active_topic=active_topic,
+            extra_error_context=extra_prompt_err,
+        )
 
     # 3. Apply Ops
     if art_type == "docx":
@@ -702,6 +715,9 @@ def edit_artifact(
         new_model = _apply_ops_to_xlsx(old_model, edit_plan.ops)
     else:
         new_model = _apply_ops_to_pptx(old_model, edit_plan.ops)
+
+    if restyle is not None:
+        new_model.style = restyle
 
     # 4. Check Grounding Rule: new/changed content may cite ONLY fresh_pack IDs
     allowed_new_sids = set(e.id for e in fresh_pack)
@@ -842,8 +858,13 @@ def edit_artifact(
 
     valid_sids_set = set(int(k) for k in standard_sources_map.keys())
 
-    # 8. Compute Diff
+    # 8. Keep the edit inside its scope, then compute the diff
     ensure_node_ids(new_model)
+    from app.services.edit_guard import restore_out_of_scope
+
+    restored = restore_out_of_scope(old_model, new_model, target_nodes if restyle is None else None)
+    if restored:
+        logger.info("Edit touched units outside its scope; restored %s from version %s", restored, ver_no)
     diff = diff_models(old_model, new_model)
     actually_changed_nodes = diff.get("changed", []) + diff.get("added", []) + diff.get("removed", [])
 
@@ -886,6 +907,14 @@ def edit_artifact(
     scope_errors = [issue for issue in val_rep.issues if issue.where.startswith("scope:")]
     if scope_errors:
         logger.warning(f"Scope validation failed: {scope_errors[0].message}")
+
+    # Regression guard: units outside the scope stay identical in the model and in the file (FR-EDIT-3)
+    guard = regression(old_model, new_model, target_nodes if restyle is None else [], old_file=old_file_path,
+                       new_file=out_file, kind=art_type)
+    if restyle is not None and guard.changed_units:
+        logger.warning("Restyle changed content units %s", guard.changed_units)
+    if isinstance(diff, dict):
+        diff["regression"] = guard.model_dump() | {"restored_out_of_scope": restored}
 
     # 10. Update Artifact Title if changed
     if new_model.title and str(artifact.title) != str(new_model.title):

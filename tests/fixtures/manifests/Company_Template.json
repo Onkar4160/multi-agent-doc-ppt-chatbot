@@ -1,0 +1,64 @@
+{
+  "bases": [
+    "cover",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "diagram",
+    "content",
+    "content",
+    "content",
+    "content",
+    "closing"
+  ],
+  "branding": [
+    "picture: small picture at the slide edge",
+    "picture: small picture at the slide edge",
+    "picture: small picture at the slide edge"
+  ],
+  "design_mode": "slides",
+  "file": "Company_Template.pptx",
+  "layouts": {
+    "1_Quote Slide": "quote",
+    "1_Title Slide": "title",
+    "About Us": "image_text",
+    "Blank": "blank",
+    "Comparison": "comparison",
+    "Content with Caption": "image_text",
+    "Our CEO": "image_text",
+    "Picture with Caption": "image_text",
+    "Quote Slide": "quote",
+    "Section Header": "section",
+    "Thank You": "closing",
+    "Timeline": "timeline",
+    "Title Only": "title_only",
+    "Title Slide": "title",
+    "Title and Content": "bullets",
+    "Title and Vertical Text": "bullets",
+    "Two Content": "two_column",
+    "Vertical Title and Text": "bullets",
+    "Who We Are ?": "image_text",
+    "slidemodel2": "title_only"
+  },
+  "roles": {
+    "branding": 3,
+    "decorative": 48,
+    "placeholder": 8,
+    "sample_content": 79,
+    "structural": 16
+  },
+  "sample_slides": 15,
+  "slide_size_in": [
+    13.33,
+    7.5
+  ],
+  "tokens": {
+    "body_font": "Open Sans",
+    "heading_font": "Calibri",
+    "primary": "C57113",
+    "source": "slides"
+  },
+  "type": "pptx"
+}

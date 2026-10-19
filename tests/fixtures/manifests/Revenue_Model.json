@@ -1,0 +1,85 @@
+{
+  "defined_names": {
+    "churn": "Assumptions!$B$3",
+    "growth": "Assumptions!$B$2"
+  },
+  "file": "Revenue_Model.xlsx",
+  "sheets": [
+    {
+      "charts": [],
+      "conditional_formats": 0,
+      "formulas": 0,
+      "name": "README",
+      "reads": [],
+      "role": "readme",
+      "tables": [],
+      "validations": 0
+    },
+    {
+      "charts": [],
+      "conditional_formats": 0,
+      "formulas": 0,
+      "name": "Assumptions",
+      "reads": [],
+      "role": "assumptions",
+      "tables": [],
+      "validations": 1
+    },
+    {
+      "charts": [],
+      "conditional_formats": 0,
+      "formulas": 0,
+      "name": "Data",
+      "reads": [],
+      "role": "data",
+      "tables": [
+        "Customers"
+      ],
+      "validations": 0
+    },
+    {
+      "charts": [],
+      "conditional_formats": 1,
+      "formulas": 18,
+      "name": "Calculations",
+      "reads": [
+        "Assumptions",
+        "Data"
+      ],
+      "role": "calculations",
+      "tables": [],
+      "validations": 0
+    },
+    {
+      "charts": [
+        "bar"
+      ],
+      "conditional_formats": 0,
+      "formulas": 1,
+      "name": "Dashboard",
+      "reads": [
+        "Calculations"
+      ],
+      "role": "report",
+      "tables": [],
+      "validations": 0
+    },
+    {
+      "charts": [],
+      "conditional_formats": 0,
+      "formulas": 0,
+      "name": "Sources",
+      "reads": [],
+      "role": "sources",
+      "tables": [],
+      "validations": 0
+    }
+  ],
+  "tokens": {
+    "body_font": "Arial",
+    "heading_font": "Arial",
+    "primary": "1F4E79",
+    "source": "sheet"
+  },
+  "type": "xlsx"
+}

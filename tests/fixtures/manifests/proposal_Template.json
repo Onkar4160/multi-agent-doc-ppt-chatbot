@@ -1,0 +1,42 @@
+{
+  "cover_lines": 0,
+  "file": "proposal_Template.docx",
+  "has_toc": false,
+  "numbering_definitions": 9,
+  "page_size": "Letter",
+  "sections": [
+    {
+      "footer": false,
+      "header": false,
+      "margins_in": {
+        "bottom": 1.0,
+        "left": 1.25,
+        "right": 1.25,
+        "top": 1.0
+      },
+      "orientation": "portrait",
+      "page_numbers": false
+    }
+  ],
+  "styles": {
+    "body": "Normal: Cambria 11.0",
+    "caption": "Caption: Cambria 9.0",
+    "heading_1": "Heading 1: Calibri 14.0",
+    "heading_2": "Heading 2: Calibri 13.0",
+    "heading_3": "Heading 3: Calibri 11.0",
+    "list_bullet": "List Bullet: Cambria 11.0",
+    "list_number": "List Number: Cambria 11.0",
+    "quote": "Quote: Cambria 11.0",
+    "subtitle": "Subtitle: Calibri 12.0",
+    "title": "Title: Calibri 26.0",
+    "toc_heading": "TOC Heading: Cambria 14.0"
+  },
+  "tables": 0,
+  "tokens": {
+    "body_font": "Cambria",
+    "heading_font": "Calibri",
+    "primary": "365F91",
+    "source": "styles"
+  },
+  "type": "docx"
+}

@@ -1,0 +1,46 @@
+{
+  "bases": [
+    "cover",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "content",
+    "closing"
+  ],
+  "branding": [],
+  "design_mode": "slides",
+  "file": "presentation_Template.pptx",
+  "layouts": {
+    "Blank": "blank",
+    "Comparison": "comparison",
+    "Content with Caption": "image_text",
+    "Picture with Caption": "image_text",
+    "Section Header": "section",
+    "Title Only": "title_only",
+    "Title Slide": "title",
+    "Title and Content": "bullets",
+    "Title and Vertical Text": "bullets",
+    "Two Content": "two_column",
+    "Vertical Title and Text": "bullets"
+  },
+  "roles": {
+    "decorative": 114,
+    "sample_content": 42
+  },
+  "sample_slides": 10,
+  "slide_size_in": [
+    20.0,
+    11.25
+  ],
+  "tokens": {
+    "body_font": "Montserrat Bold",
+    "heading_font": "Montserrat Bold",
+    "primary": "866B00",
+    "source": "slides"
+  },
+  "type": "pptx"
+}

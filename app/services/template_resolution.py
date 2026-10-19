@@ -85,7 +85,7 @@ def resolve_templates(
         # Check DOCX requirement
         if "docx" in art_type_strs:
             docx_candidates = [
-                f for f in available_files if f.file_type.lower() in ("docx", "doc")
+                f for f in available_files if f.file_type.lower() in ("docx", "doc", "dotx")
             ]
             if not docx_candidates:
                 # User uploaded a file, but not a DOCX (e.g. PNG or PDF)
@@ -106,7 +106,7 @@ def resolve_templates(
         # Check PPTX requirement
         if "pptx" in art_type_strs:
             pptx_candidates = [
-                f for f in available_files if f.file_type.lower() in ("pptx", "ppt")
+                f for f in available_files if f.file_type.lower() in ("pptx", "ppt", "potx")
             ]
             if not pptx_candidates:
                 non_matching = [f.file_type.upper() for f in available_files]

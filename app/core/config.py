@@ -1,6 +1,6 @@
 """Application settings loaded from environment variables."""
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     storage_dir: str = Field(default="storage", validation_alias="STORAGE_DIR")
 
     # ── Upload ───────────────────────────────────────────
-    max_upload_mb: int = Field(default=25, validation_alias="MAX_UPLOAD_MB")
+    max_upload_mb: int = Field(default=25, validation_alias=AliasChoices("UPLOAD_MAX_MB", "MAX_UPLOAD_MB"))
 
     # ── Templates ─────────────────────────────────────────
     default_docx_template_path: str = Field(
@@ -47,9 +47,28 @@ class Settings(BaseSettings):
     )
 
     # ── LLM ──────────────────────────────────────────────
-    gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
-    gemini_fallback_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_FALLBACK_MODEL")
+    gemini_model: str = Field(
+        default="gemini-3.8-flash", validation_alias=AliasChoices("GEMINI_MODEL", "LLM_PRIMARY_MODEL")
+    )
+    # Comma-separated; tried in order when a model is retired, out of quota or keeps failing.
+    gemini_fallback_model: str = Field(
+        default="gemini-3.7-flash,gemini-3.5-flash,gemini-3.1-flash-lite",
+        validation_alias=AliasChoices("GEMINI_FALLBACK_MODEL", "LLM_FALLBACK_MODEL"),
+    )
     llm_max_retries: int = 3
+    # Reasoning tokens per call for models that "think" (Gemini 2.5+). Structured planning/writing does not need
+    # long hidden reasoning; a small budget cuts latency and output tokens several-fold. -1 = model default.
+    llm_thinking_budget: int = Field(default=512, validation_alias="LLM_THINKING_BUDGET")
+    llm_max_calls_per_run: int = Field(default=30, validation_alias="LLM_MAX_CALLS_PER_RUN")  # real requests per chat run
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    log_format: str = Field(default="text", validation_alias="LOG_FORMAT")  # text | json
+
+    # ── Research & media ─────────────────────────────────
+    academic_search: bool = Field(default=True, validation_alias="ACADEMIC_SEARCH")  # OpenAlex, arXiv, S2
+    semantic_scholar_api_key: str = Field(default="", validation_alias="SEMANTIC_SCHOLAR_API_KEY")
+    images_enabled: bool = Field(default=True, validation_alias="IMAGES_ENABLED")  # photos in template frames
+    pexels_api_key: str = Field(default="", validation_alias="PEXELS_API_KEY")  # optional; Openverse otherwise
+    max_deck_images: int = Field(default=4, validation_alias="MAX_DECK_IMAGES")
     mock_llm: bool = Field(default=False, validation_alias="MOCK_LLM")
 
     @property
@@ -63,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def llm_fallback_model(self) -> str:
         return self.gemini_fallback_model
+
+    @property
+    def fallback_models(self) -> list[str]:
+        return [m.strip() for m in (self.gemini_fallback_model or "").split(",") if m.strip()]
 
 
 _settings: Settings | None = None

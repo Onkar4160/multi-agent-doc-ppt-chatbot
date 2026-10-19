@@ -10,9 +10,14 @@ from pydantic import BaseModel, Field
 import pptx
 
 from app.llm.client import get_llm_client, LLMClient
+from app.services.analyzers.pptx_manifest import design_tokens, inventory, layout_archetype, layout_branding
+from app.services.analyzers.slide_design import analyze_slide_design, theme_info
+from app.services.analyzers.template_package import file_sha256, regular_package
 from app.models.template_profile import (
+    ANALYZER_VERSION,
     PlaceholderInfo,
     PptStyleProfile,
+    SlideDesign,
     SlideLayoutInfo,
     SlideRole,
     TemplateProfile,
@@ -58,7 +63,7 @@ def analyze_presentation(
         raise FileNotFoundError(f"PPTX file not found: {file_path}")
 
     try:
-        prs = pptx.Presentation(path)
+        prs = pptx.Presentation(regular_package(path))  # .potx opens as a presentation
     except Exception as exc:
         raise ValueError(f"Corrupt or invalid PPTX file '{path.name}': {exc}") from exc
 
@@ -110,6 +115,7 @@ def analyze_presentation(
             placeholders=placeholders,
             decoration_score=dec_score,
             role_candidates=candidates,
+            archetype=layout_archetype(layout.name, [ph.type for ph in placeholders]),
         ))
 
         for c_role in candidates:
@@ -196,7 +202,12 @@ def analyze_presentation(
         layout_roles=layout_roles,
         existing_slides=existing_slides,
         avg_words_per_slide=avg_words,
+        slide_design=_analyze_slide_design(prs, path),
+        inventory=inventory(prs),
+        branding=layout_branding(prs),
     )
+    theme_colors_raw, theme_fonts_raw = theme_info(prs)
+    tokens = design_tokens(prs, ppt_style.slide_design, theme_colors_raw, theme_fonts_raw)
 
     # 4. Make at most ONE LLM call for ToneProfile and content_summary
     if llm_client is None:
@@ -234,10 +245,22 @@ def analyze_presentation(
         tone=tone,
         content_summary=content_summary,
         text_preview=text_preview,
+        analyzer_version=ANALYZER_VERSION,
+        design_tokens=tokens,
+        sha256=file_sha256(path),
     )
 
 
 # ── Internal Helpers ───────────────────────────────────────────────────────
+
+def _analyze_slide_design(prs: pptx.Presentation, path: Path) -> SlideDesign | None:
+    """Designed sample-slide bases (Canva-style templates); None when the analysis fails."""
+    try:
+        return analyze_slide_design(prs)
+    except Exception as exc:
+        logger.warning("Slide design analysis failed for '%s': %s", path.name, exc)
+        return None
+
 
 def _detect_layout_role(name: str, placeholders: list[PlaceholderInfo]) -> SlideRole:
     """Detect functional slide layout role from name and placeholder types."""

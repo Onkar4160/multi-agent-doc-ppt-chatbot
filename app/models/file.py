@@ -20,4 +20,6 @@ class UploadedFile(Base, TimestampMixin):
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     stored_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    owner: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)  # username (ADR-014)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     purpose: Mapped[str | None] = mapped_column(String(50), nullable=True, default="REFERENCE")

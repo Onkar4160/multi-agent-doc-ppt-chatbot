@@ -290,3 +290,30 @@ def build_session_context(
     """Build session context dict for backwards-compatible consumers."""
     ctx = build_conversation_context(session_id, db)
     return ctx.to_dict()
+
+
+def load_active_model(db: Session, context: ConversationContext) -> Any:
+    """The content model (IR) of the session's active artifact at its latest version, or None."""
+    from app.models.deck_model import DeckModel
+    from app.models.document_model import DocumentModel
+    from app.models.workbook_model import WorkbookModel
+
+    art = context.active_artifact or (context.artifact_history[-1] if context.artifact_history else None)
+    if not art or not art.get("artifact_id"):
+        return None
+    version = (
+        db.query(ArtifactVersion)
+        .filter(ArtifactVersion.artifact_id == art["artifact_id"])
+        .order_by(ArtifactVersion.version_no.desc())
+        .first()
+    )
+    if version is None or not version.model_json:
+        return None
+    model_cls = {"pptx": DeckModel, "docx": DocumentModel, "xlsx": WorkbookModel}.get(str(art.get("kind", "")).lower())
+    if model_cls is None:
+        return None
+    try:
+        return model_cls.model_validate_json(version.model_json)
+    except Exception as exc:
+        logger.debug(f"Active artifact model could not be loaded: {exc}")
+        return None

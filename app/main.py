@@ -5,7 +5,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.database import create_tables, get_session_factory
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from app.core.config import get_settings
+from app.core.database import create_tables, fail_interrupted_runs, get_session_factory
+from app.core.errors import AppError
+from app.core.logging import configure_logging
 from app.services.workspace_init import init_default_workspace
 from app.api.health import router as health_router
 from app.api.auth import router as auth_router
@@ -18,8 +24,12 @@ from app.api.workspaces import router as workspaces_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: create DB tables and initialize default workspace. Shutdown: nothing special."""
+    """Startup: logging, DB tables, interrupted runs, default workspace. Shutdown: nothing special."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
     await create_tables()
+    async with get_session_factory()() as session:
+        await fail_interrupted_runs(session)
     session_factory = get_session_factory()
     async with session_factory() as session:
         await init_default_workspace(session)
@@ -31,6 +41,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    """Errors from the taxonomy reach the client as their status and plain-language message."""
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,0 +1,46 @@
+{
+  "deck": {
+    "kind": "pptx",
+    "title": "European EV Charging Market",
+    "model": {
+      "title": "European EV Charging Market",
+      "slides": [
+        {"role": "title", "title": "European EV Charging Market", "subtitle": "Investor update"},
+        {"role": "title_content", "title": "Agenda", "bullets": [{"text": "Market"}, {"text": "Players"}, {"text": "Outlook"}]},
+        {"role": "title_content", "title": "Pricing Models", "bullets": [{"text": "Per kWh"}, {"text": "Subscription"}]},
+        {"role": "title_content", "title": "Market Size", "bullets": [{"text": "2.1 bn EUR in 2025"}]},
+        {"role": "two_content", "title": "Build vs Partner", "left": [{"text": "Control"}], "right": [{"text": "Speed"}]},
+        {"role": "title_content", "title": "Key Players", "bullets": [{"text": "Ionity"}, {"text": "Allego"}]},
+        {"role": "title_content", "title": "Risks", "bullets": [{"text": "Grid capacity"}]},
+        {"role": "title_only", "title": "Thank You"}
+      ]
+    }
+  },
+  "doc": {
+    "kind": "docx",
+    "title": "Microplastics in Drinking Water",
+    "model": {
+      "title": "Microplastics in Drinking Water",
+      "sections": [
+        {"heading": "Executive Summary", "level": 1, "blocks": [{"type": "paragraph", "text": "Summary."}]},
+        {"heading": "Introduction", "level": 1, "blocks": [{"type": "paragraph", "text": "Intro."}]},
+        {"heading": "Market Analysis", "level": 1, "blocks": [{"type": "paragraph", "text": "Market."}]},
+        {"heading": "Costs", "level": 1, "blocks": [{"type": "table", "headers": ["Item", "Cost"], "rows": [["Filters", "120"]]}]},
+        {"heading": "Recommendations", "level": 1, "blocks": [{"type": "bullets", "items": ["Test regularly"]}]},
+        {"heading": "Conclusion", "level": 1, "blocks": [{"type": "paragraph", "text": "End."}]}
+      ]
+    }
+  },
+  "book": {
+    "kind": "xlsx",
+    "title": "SaaS Revenue Model",
+    "model": {
+      "title": "SaaS Revenue Model",
+      "sheets": [
+        {"name": "Assumptions", "cells": [{"coordinate": "A1", "value": "Churn"}]},
+        {"name": "Calculations", "cells": [{"coordinate": "A1", "value": "MRR"}]},
+        {"name": "Dashboard", "cells": [{"coordinate": "A1", "value": "Total"}]}
+      ]
+    }
+  }
+}

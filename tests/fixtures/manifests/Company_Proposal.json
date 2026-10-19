@@ -1,0 +1,42 @@
+{
+  "cover_lines": 8,
+  "file": "Company_Proposal.docx",
+  "has_toc": false,
+  "numbering_definitions": 9,
+  "page_size": "Letter",
+  "sections": [
+    {
+      "footer": true,
+      "header": true,
+      "margins_in": {
+        "bottom": 1.0,
+        "left": 1.0,
+        "right": 1.0,
+        "top": 1.0
+      },
+      "orientation": "portrait",
+      "page_numbers": true
+    }
+  ],
+  "styles": {
+    "body": "Normal: Calibri 11.0",
+    "caption": "Caption: Calibri 9.0",
+    "heading_1": "Heading 1: Calibri 14.0",
+    "heading_2": "Heading 2: Calibri 13.0",
+    "heading_3": "Heading 3: Calibri 11.0",
+    "list_bullet": "List Bullet: Calibri 11.0",
+    "list_number": "List Number: Calibri 11.0",
+    "quote": "Quote: Calibri 11.0",
+    "subtitle": "Subtitle: Calibri 12.0",
+    "title": "Title: Calibri 26.0",
+    "toc_heading": "TOC Heading: Cambria 14.0"
+  },
+  "tables": 2,
+  "tokens": {
+    "body_font": "Calibri",
+    "heading_font": "Calibri",
+    "primary": "365F91",
+    "source": "styles"
+  },
+  "type": "docx"
+}

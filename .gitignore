@@ -22,9 +22,13 @@ storage/app.db
 storage/uploads/*
 storage/artifacts/*
 storage/llm_cache/*
+storage/search_cache/*
+storage/workspaces/*
 !storage/uploads/.gitkeep
 !storage/artifacts/.gitkeep
 !storage/llm_cache/.gitkeep
+!storage/search_cache/.gitkeep
+!storage/workspaces/.gitkeep
 
 # Output files
 data/outputs/*

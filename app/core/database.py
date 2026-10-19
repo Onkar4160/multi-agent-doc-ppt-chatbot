@@ -56,9 +56,31 @@ async def get_db():
             raise
 
 
+# Columns added after a table first shipped: (table, column, SQL type). Added when missing, never dropped.
+ADDED_COLUMNS = (
+    ("chat_sessions", "owner", "VARCHAR(100)"),
+    ("uploaded_files", "owner", "VARCHAR(100)"),
+    ("uploaded_files", "sha256", "VARCHAR(64)"),
+    ("artifacts", "owner", "VARCHAR(100)"),
+    ("artifacts", "task_id", "INTEGER"),
+    ("artifact_versions", "quality_json", "TEXT"),
+    ("artifact_versions", "dossier_id", "INTEGER"),
+    ("template_profile_records", "sha256", "VARCHAR(64)"),
+    ("template_profile_records", "analyzer_version", "INTEGER"),
+)
+
+
 def run_migrations_sync(connection) -> None:
     """Safe, idempotent migration to add new columns to existing SQLite tables."""
     from sqlalchemy import text
+    for table, column, sql_type in ADDED_COLUMNS:
+        try:
+            cols = [row[1] for row in connection.execute(text(f"PRAGMA table_info({table})")).fetchall()]
+            if cols and column not in cols:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Migration warning (%s.%s): %s", table, column, exc)
     try:
         # Check artifacts table
         res = connection.execute(text("PRAGMA table_info(artifacts)"))
@@ -172,6 +194,38 @@ async def create_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(run_migrations_sync)
+
+
+INTERRUPTED_REPLY = (
+    "I couldn't finish that request: the server restarted while it was running. Nothing was delivered. "
+    "Say “try again” to run it again."
+)
+
+
+async def fail_interrupted_runs(session: AsyncSession) -> int:
+    """Runs still 'running' at startup were cut off by a restart: mark them failed and give them a reply."""
+    import json
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.models.chat import ChatMessage
+    from app.models.run import AgentRun
+
+    runs = (await session.execute(select(AgentRun).where(AgentRun.status == "running"))).scalars().all()
+    for run in runs:
+        request = (
+            await session.execute(
+                select(ChatMessage.content).where(ChatMessage.run_id == run.run_id, ChatMessage.role == "user")
+            )
+        ).scalars().first()
+        run.status = "failed"
+        run.finished_at = datetime.utcnow()
+        run.result_json = json.dumps({"reply": INTERRUPTED_REPLY, "request": request, "artifacts": [], "errors": ["interrupted"]})
+        if run.session_id:
+            session.add(ChatMessage(session_id=run.session_id, role="assistant", content=INTERRUPTED_REPLY, run_id=run.run_id))
+    await session.commit()
+    return len(runs)
 
 
 def get_sync_session():

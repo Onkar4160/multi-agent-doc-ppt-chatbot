@@ -111,6 +111,29 @@ def _search_web_single_query(
     return results
 
 
+def _search_scholarly_cached(topic: str, today_str: str) -> list[dict[str, Any]]:
+    """Papers for the topic from OpenAlex, Semantic Scholar and arXiv (disk-cached per day)."""
+    settings = get_settings()
+    if not settings.academic_search or settings.mock_llm:
+        return []
+    cache_path = _get_cache_dir() / (
+        "scholar_" + hashlib.md5(f"{topic.strip().lower()}_{today_str}".encode("utf-8")).hexdigest() + ".json"
+    )
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"Failed to read scholarly cache '{cache_path}': {exc}")
+    from app.services.academic_search import search_scholarly
+
+    results = search_scholarly(topic, semantic_scholar_key=settings.semantic_scholar_api_key or None)
+    try:
+        cache_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"Failed to write scholarly cache: {exc}")
+    return results
+
+
 # ── Web Research Agent Main Entry ──────────────────────────────────────────
 
 def research(
@@ -210,6 +233,28 @@ def research(
                     "url": url,
                     "snippet": snippet,
                 })
+
+    # ── Scholarly sources: papers and preprints (abstracts are the evidence) ──
+    from app.services.academic_search import scholarly_title
+
+    for paper in _search_scholarly_cached(topic, today_str):
+        title = scholarly_title(paper)
+        sid = registry.add(
+            kind="web",
+            title=title,
+            url_or_path=paper["url"],
+            snippet=paper["snippet"],
+            score=0.85,
+            published_date=paper.get("published_date"),
+        )
+        if sid not in registered_source_ids:
+            registered_source_ids.append(sid)
+            registered_snippets.append({
+                "source_id": sid,
+                "title": f"[{paper.get('kind', 'paper')}] {title}",
+                "url": paper["url"],
+                "snippet": paper["snippet"],
+            })
 
     # ── LLM Call 2: Synthesize findings from snippets ──────────────────────
     if registered_snippets:

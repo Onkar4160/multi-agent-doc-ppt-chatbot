@@ -100,7 +100,45 @@ SEMANTIC REASONING GUIDELINES:
 
 9. `confidence` & `ambiguity`:
    - Assign confidence (0.0 to 1.0). If genuine ambiguity exists, set ambiguity=true and populate clarification_needed.
+   - Ambiguous topics: when the topic is an acronym or name with several plausible meanings (e.g. "CJP" could be
+     a political party, a justice programme or a company) and nothing in the message or conversation settles it,
+     set ambiguity=true, confidence below 0.6, and put ONE clarification question listing the likely meanings in
+     clarification_needed. Never silently pick one.
 """
+
+
+# Acronyms whose everyday meaning is clear enough to write about without asking.
+_KNOWN_ACRONYMS = {
+    "AI", "ML", "EV", "EVS", "IOT", "API", "APIS", "USA", "US", "UK", "EU", "UN", "GDP", "CEO", "CFO", "CTO",
+    "HR", "IT", "ESG", "SAAS", "NATO", "NASA", "WHO", "IMF", "B2B", "B2C", "CRM", "ERP", "SEO", "ROI", "KPI",
+    "KPIS", "UI", "UX", "AR", "VR", "5G", "LLM", "LLMS", "GPU", "CPU", "RAG", "SQL", "AWS", "GST", "MSME", "SME",
+    "SMES", "COVID", "DNA", "RNA", "IPO", "VC", "PR", "R&D", "CSR", "OKR", "OKRS", "Q1", "Q2", "Q3", "Q4",
+    "IPL", "FIFA", "ISRO", "RBI", "SEBI", "GDPR", "UPI", "NFT", "NFTS", "ESA", "OPEC", "WTO", "UNESCO",
+}
+_REQUEST_WORDS = {
+    "make", "create", "generate", "build", "write", "prepare", "draft", "produce", "give", "me", "please", "a",
+    "an", "the", "on", "about", "for", "of", "with", "deck", "presentation", "slides", "slide", "ppt", "pptx",
+    "powerpoint", "report", "document", "doc", "docx", "word", "paper", "brief", "overview", "and", "pages", "page",
+    "can", "you", "i", "need", "want", "short", "quick", "detailed",
+}
+
+
+def ambiguous_acronym_question(user_msg: str) -> str | None:
+    """A clarification question when the whole topic is one unexplained acronym (e.g. "a deck on CJP")."""
+    if "(" in user_msg:
+        return None  # an expansion is given
+    words = re.findall(r"[A-Za-z0-9&\-]+", user_msg)
+    content = [w for w in words if w.lower() not in _REQUEST_WORDS and not re.fullmatch(r"\d+(-\w+)?", w)]
+    if len(content) != 1:
+        return None
+    token = content[0]
+    if not re.fullmatch(r"[A-Z][A-Z0-9&]{1,5}", token) or token.upper() in _KNOWN_ACRONYMS:
+        return None
+    return (
+        f"“{token}” can mean several different things. Which one do you mean? "
+        f"Reply with the full name (for example the organisation, programme or technology), "
+        f"and I'll start right away."
+    )
 
 
 def _infer_semantic_intent(
@@ -238,7 +276,7 @@ def _infer_semantic_intent(
         tmpl_mode = TemplateMode.UPLOADED
     elif re.search(r"\b(same\s+template|existing\s+template|previous\s+template)\b", msg_lower):
         tmpl_mode = TemplateMode.EXISTING
-    elif re.search(r"\b(no\s+template|blank\s+template)\b", msg_lower):
+    elif re.search(r"\b(no\s+template|blank\s+template|without\s+(?:a\s+|any\s+)?template|own\s+design|clean\s+design|generated\s+design)\b", msg_lower):
         tmpl_mode = TemplateMode.NONE
 
     # Target Artifact ID
@@ -444,5 +482,15 @@ def parse_plan(
                 plan.attachment_roles[fname] = "PRIMARY_SOURCE"
             if "analyze_uploaded_files" not in plan.capabilities:
                 plan.capabilities.insert(0, "analyze_uploaded_files")
+
+    # Ambiguous topics (an acronym with several meanings): ask one question instead of guessing.
+    if plan.operation == OperationType.CREATE and not file_ids and not plan.error:
+        question = ambiguous_acronym_question(user_message)
+        if question is None and plan.ambiguity and plan.clarification_needed and plan.confidence < 0.6:
+            question = plan.clarification_needed
+        if question:
+            plan.error = "CLARIFICATION_NEEDED"
+            plan.clarification_needed = question
+            plan.reasoning = question
 
     return plan

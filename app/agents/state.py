@@ -28,5 +28,21 @@ class GraphState(TypedDict, total=False):
     retry_count: int
     reply: str
     errors: list[str]
+    notes: list[str]  # non-error remarks for the reply (e.g. a template that did not fit)
+    failure: str  # plain-language reply for the first failed step
+    clarification_for: str  # request waiting for the user's answer to a clarification question
+    kind_hint: str | None  # "retry" | "clarification_answer" decided by the chat API before the graph runs
+    pending_clarification: str | None  # the request the user is answering
+    raw_message: str  # the user's own words (user_message may be a merged or retried request)
+    interpretation: dict[str, Any] | None  # Interpretation (app/models/interpretation.py)
+    task_id: int | None
+    dossier: dict[str, Any] | None  # research summary: sources, coverage, conflicts, gaps (Stage 5)
+    dossier_id: int | None
+    research_summary: str
     session_context: dict[str, Any] | None
     evidence_pack: list[dict[str, Any]] | None
+    claims: list[dict[str, Any]]  # claim digest planners and writers cite (Stage 7, services/plan_inputs.py)
+    limitations: list[str]  # gaps and conflicts writers must state honestly
+    questions: dict[str, str]  # research question id -> question
+    content_plans: dict[str, Any]  # {'pptx': DeckPlan, 'docx': DocumentPlan, 'xlsx': WorkbookPlan} as dicts
+    plan_reports: dict[str, Any]  # PlanReport per format: plan validation, revision, repairs, coverage

@@ -18,6 +18,9 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.core.errors import BudgetExceeded
+from app.llm import usage
+from app.llm.errors import LLMAuthError, LLMModelUnavailable, LLMRateLimited
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -37,6 +40,9 @@ def get_search_cache_dir() -> Path:
 
 
 _get_cache_dir = get_cache_dir
+
+
+_NO_THINKING_CONFIG: set[str] = set()  # models that rejected a thinking budget
 
 
 @dataclass
@@ -81,7 +87,8 @@ class LLMClient:
         settings = get_settings()
         self._mock_mode = settings.mock_llm
         self._primary = settings.gemini_model
-        self._fallback = settings.gemini_fallback_model
+        self._fallbacks = settings.fallback_models
+        self._sleep = time.sleep
         self._max_retries = settings.llm_max_retries
         self._stats = LLMCallStats()
         self._last_record: LLMCallRecord | None = None
@@ -132,6 +139,7 @@ class LLMClient:
             if cached is not None:
                 logger.info("LLM cache hit for text query %s", cache_key[:12])
                 self._stats.cache_hits += 1
+                usage.record_cache_hit()
                 self._last_record = LLMCallRecord(
                     model=self._primary, cache_hit=True, latency_ms=0.0,
                 )
@@ -169,6 +177,7 @@ class LLMClient:
                     schema.__name__, cache_key[:12],
                 )
                 self._stats.cache_hits += 1
+                usage.record_cache_hit()
                 self._last_record = LLMCallRecord(
                     model=self._primary, cache_hit=True, latency_ms=0.0,
                 )
@@ -339,6 +348,9 @@ class LLMClient:
 
     # ── Internal helpers ─────────────────────────────────
 
+    def _model_chain(self) -> list[str]:
+        return list(dict.fromkeys([self._primary, *self._fallbacks]))
+
     def _call_with_retry(
         self,
         prompt: str,
@@ -350,62 +362,79 @@ class LLMClient:
         image_bytes: bytes | None = None,
         image_mime: str = "image/png",
     ) -> str:
-        """Call Gemini with exponential backoff retry and model fallback."""
-        candidate_models = [self._primary, self._fallback, "gemini-2.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
-        models: list[str] = []
-        for m in candidate_models:
-            if m and m not in models:
-                models.append(m)
+        """Call Gemini down the model chain: retry short failures, skip retired or exhausted models."""
+        chain = self._model_chain()
+        last_error: Exception | None = None
+        for model_name in chain:
+            if _unavailable.get(model_name, 0) > time.monotonic():
+                continue
+            try:
+                return self._call_model(
+                    model_name,
+                    prompt,
+                    system=system,
+                    response_mime_type=response_mime_type,
+                    response_schema=response_schema,
+                    temperature=temperature,
+                    image_bytes=image_bytes,
+                    image_mime=image_mime,
+                )
+            except LLMModelUnavailable as exc:
+                _mark_unavailable(model_name, 24 * 3600, "retired or unknown model")
+                last_error = exc
+            except LLMRateLimited as exc:
+                # Retries already waited out short limits; a long or daily limit means move on.
+                _mark_unavailable(model_name, exc.retry_after_s or 3600, "quota exhausted")
+                last_error = exc
+            except (BudgetExceeded, LLMAuthError):
+                raise  # budget spent / key refused: another model cannot help
+            except Exception as exc:
+                logger.warning("LLM model '%s' failed (%s); trying fallback", model_name, str(exc)[:200])
+                last_error = exc
+        if last_error is None or isinstance(last_error, (LLMRateLimited, LLMModelUnavailable)):
+            raise LLMRateLimited(
+                "every configured AI model is out of quota or unavailable right now", quota=True
+            )
+        raise last_error
 
-        for model_name in models:
-            for attempt in range(1, self._max_retries + 1):
-                try:
-                    start_time = time.perf_counter()
-                    res = self._single_call(
-                        model_name,
-                        prompt,
-                        system=system,
-                        response_mime_type=response_mime_type,
-                        response_schema=response_schema,
-                        temperature=temperature,
-                        image_bytes=image_bytes,
-                        image_mime=image_mime,
-                    )
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000
-                    self._stats.real_calls += 1
-                    self._last_record = LLMCallRecord(
-                        model=model_name, cache_hit=False, latency_ms=elapsed_ms,
-                    )
-                    logger.info(
-                        "LLM call to model '%s' completed in %.0f ms",
-                        model_name,
-                        elapsed_ms,
-                    )
-                    return res
-                except Exception as exc:
-                    err_str = str(exc)
-                    is_daily_quota = "generaterequestsperday" in err_str.lower() or "quota exceeded" in err_str.lower() and "perday" in err_str.lower()
-                    is_retryable = (
-                        any(code in err_str for code in ("429", "500", "502", "503", "504"))
-                        and not is_daily_quota
-                    )
-                    logger.warning(
-                        "LLM call failed (model=%s attempt=%d/%d): %s",
-                        model_name,
-                        attempt,
-                        self._max_retries,
-                        err_str[:200],
-                    )
-                    if is_retryable and attempt < self._max_retries:
-                        wait = 2 ** attempt
-                        logger.info("Retrying in %ds…", wait)
-                        time.sleep(wait)
-                    else:
-                        break  # non-retryable error or daily quota exhausted -> try fallback model
-
-            logger.info("Falling back from '%s' to next model…", model_name)
-
-        raise RuntimeError("All LLM models exhausted after retries")
+    def _call_model(self, model_name: str, prompt: str, **kwargs) -> str:
+        """One model with retries: transient errors back off, short rate limits wait the advised delay."""
+        for attempt in range(1, self._max_retries + 1):
+            usage.charge()  # every attempt spends quota, so every attempt counts against the run budget
+            start_time = time.perf_counter()
+            try:
+                res = self._single_call(model_name, prompt, **kwargs)
+            except Exception as exc:
+                usage.record_call(model_name, (time.perf_counter() - start_time) * 1000)
+                code = getattr(exc, "code", None)
+                if code == 404:
+                    raise LLMModelUnavailable(f"model '{model_name}' is not available") from exc
+                if code in (401, 403):
+                    raise LLMAuthError(f"API key refused ({code})", _provider_message(exc)) from exc
+                if code == 429:
+                    retry_after, daily = _quota_details(exc)
+                    if daily or attempt >= self._max_retries or (retry_after is not None and retry_after > 45):
+                        raise LLMRateLimited(
+                            f"model '{model_name}' rate limited", quota=daily, daily=daily, retry_after_s=retry_after
+                        ) from exc
+                    wait = retry_after if retry_after is not None else 4 * 2 ** (attempt - 1)
+                elif code in (500, 502, 503, 504, 408) and attempt < self._max_retries:
+                    wait = 2 ** attempt
+                else:
+                    raise
+                logger.warning(
+                    "LLM call failed (model=%s attempt=%d/%d, %s); retrying in %.1fs",
+                    model_name, attempt, self._max_retries, code, wait,
+                )
+                self._sleep(wait)
+                continue
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            usage.record_call(model_name, elapsed_ms)
+            self._stats.real_calls += 1
+            self._last_record = LLMCallRecord(model=model_name, cache_hit=False, latency_ms=elapsed_ms)
+            logger.info("LLM call to model '%s' completed in %.0f ms", model_name, elapsed_ms)
+            return res
+        raise RuntimeError(f"model '{model_name}' failed after {self._max_retries} attempts")
 
     def _single_call(
         self,
@@ -430,6 +459,9 @@ class LLMClient:
         if response_schema:
             config_kwargs["response_schema"] = response_schema
 
+        budget = get_settings().llm_thinking_budget
+        if budget >= 0 and model not in _NO_THINKING_CONFIG:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=budget)
         config = types.GenerateContentConfig(**config_kwargs)
 
         # Build contents
@@ -441,11 +473,17 @@ class LLMClient:
         else:
             contents = prompt
 
-        response = self._client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config,
-        )
+        try:
+            response = self._client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as exc:
+            # Models without a thinking budget (or with a different minimum) reject the setting: retry once without.
+            if "thinking" not in str(exc).lower() or "thinking_config" not in config_kwargs:
+                raise
+            _NO_THINKING_CONFIG.add(model)
+            config_kwargs.pop("thinking_config")
+            response = self._client.models.generate_content(
+                model=model, contents=contents, config=types.GenerateContentConfig(**config_kwargs))
+        usage.record_tokens(getattr(response, "usage_metadata", None))
         return response.text or ""
 
     # ── Disk cache ───────────────────────────────────────
@@ -481,6 +519,47 @@ def _warn_mock_mode() -> None:
     )
     warnings.warn(msg, stacklevel=3)
     logger.warning(msg)
+
+
+# ── Model availability (process-wide) ────────────────────
+
+# model name -> monotonic time until which it is skipped (retired, or out of quota).
+_unavailable: dict[str, float] = {}
+_DELAY = re.compile(r"^\s*([\d.]+)s\s*$")
+
+
+def _mark_unavailable(model: str, seconds: float, why: str) -> None:
+    _unavailable[model] = time.monotonic() + seconds
+    logger.warning("model=%s skipped for %.0f min (%s)", model, seconds / 60, why)
+
+
+def _provider_message(exc: Exception) -> str:
+    """The human message inside a Google RPC error body, if any."""
+    body = getattr(exc, "details", None)
+    if isinstance(body, dict):
+        body = body.get("error", body)
+        if isinstance(body, dict):
+            return str(body.get("message") or "")[:200]
+    return ""
+
+
+def _quota_details(exc: Exception) -> tuple[float | None, bool]:
+    """Retry delay (s) and whether the exhausted quota is a daily one, from Google RPC error details."""
+    body = getattr(exc, "details", None)
+    if isinstance(body, dict) and "error" in body:
+        body = body["error"]
+    details = body.get("details") if isinstance(body, dict) else None
+    retry_after, daily = None, False
+    for d in details or []:
+        kind = str(d.get("@type", ""))
+        if kind.endswith("RetryInfo"):
+            m = _DELAY.match(str(d.get("retryDelay", "")))
+            if m:
+                retry_after = float(m.group(1))
+        elif kind.endswith("QuotaFailure"):
+            ids = " ".join(str(v.get("quotaId", "")) for v in d.get("violations") or [])
+            daily = daily or "PerDay" in ids
+    return retry_after, daily
 
 
 # ── Singleton accessor ───────────────────────────────────

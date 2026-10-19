@@ -54,3 +54,11 @@ def setup_test_env():
     reset_db()
     reset_llm_client()
     shutil.rmtree(_temp_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _offline_web_search(request, monkeypatch):
+    """ADR-020: the default suite never calls live search; tests that need results patch the search themselves."""
+    if request.node.get_closest_marker("live"):
+        return
+    monkeypatch.setattr("app.agents.web_research._search_web_single_query", lambda *args, **kwargs: [])

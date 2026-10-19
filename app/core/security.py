@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -14,6 +14,7 @@ from app.core.database import get_db
 
 _pwd_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 _bearer = HTTPBearer()
+_optional_bearer = HTTPBearer(auto_error=False)
 
 
 def hash_password(plain: str) -> str:
@@ -51,9 +52,25 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ):
     """FastAPI dependency – extracts and validates the current user from JWT."""
+    return await _user_from_token(creds.credentials, db)
+
+
+async def get_user_from_header_or_token(
+    token: str | None = Query(None, description="JWT for browser download links that cannot send headers"),
+    creds: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Like ``get_current_user`` but also accepts the JWT as a ``token`` query parameter (download links)."""
+    raw = creds.credentials if creds else token
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return await _user_from_token(raw, db)
+
+
+async def _user_from_token(raw: str, db: AsyncSession):
     from app.models.user import User  # deferred to avoid circular import
 
-    payload = decode_access_token(creds.credentials)
+    payload = decode_access_token(raw)
     username: str | None = payload.get("sub")
     if username is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")

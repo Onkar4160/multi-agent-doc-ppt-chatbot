@@ -5,6 +5,19 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+def _docx_bytes(text: str) -> bytes:
+    """A real Word document: uploads are judged by content, not by a ZIP signature alone."""
+    import io
+
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph(text)
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
 @pytest.fixture(name="client")
 def client_fixture():
     """TestClient fixture that triggers app lifespan (creating DB tables)."""
@@ -61,7 +74,7 @@ def test_file_upload_and_list_success(client: TestClient):
     headers = {"Authorization": f"Bearer {token}"}
 
     # 2. Upload a valid docx file
-    file_bytes = b"PK\x03\x04Hello docx test content"
+    file_bytes = _docx_bytes("Hello docx test content")
     upload_res = client.post(
         "/files/upload",
         headers=headers,
@@ -115,7 +128,7 @@ def test_file_upload_corrupt_zip(client: TestClient):
         files={"file": ("bad.docx", b"Not a zip at all", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
     )
     assert res_docx.status_code == 400
-    assert res_docx.json()["detail"] == "Corrupt file"
+    assert res_docx.json()["detail"].startswith("Corrupt file")
 
     # Corrupt pptx
     res_pptx = client.post(
@@ -124,7 +137,7 @@ def test_file_upload_corrupt_zip(client: TestClient):
         files={"file": ("bad.pptx", b"Corrupted pptx payload", "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
     )
     assert res_pptx.status_code == 400
-    assert res_pptx.json()["detail"] == "Corrupt file"
+    assert res_pptx.json()["detail"].startswith("Corrupt file")
 
 
 def test_file_upload_duplicate_returns_existing(client: TestClient):
@@ -136,7 +149,7 @@ def test_file_upload_duplicate_returns_existing(client: TestClient):
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    content = b"PK\x03\x04Unique template content for duplicate testing"
+    content = _docx_bytes("Unique template content for duplicate testing")
     res1 = client.post(
         "/files/upload",
         headers=headers,

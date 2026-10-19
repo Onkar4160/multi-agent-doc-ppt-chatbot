@@ -50,6 +50,9 @@ SOURCE_KEYWORDS = re.compile(
 )
 
 
+_CHOSEN_ROLES = {"TEMPLATE": FileRole.TEMPLATE, "SOURCE": FileRole.SOURCE, "DATASET": FileRole.SOURCE}
+
+
 def classify_attached_files(
     files: Sequence[Union[UploadedFile, dict[str, Any], int]] | None = None,
     user_prompt: str = "",
@@ -116,6 +119,21 @@ def classify_attached_files(
         f_type = (getattr(f, "file_type", "") if not isinstance(f, dict) else f.get("file_type", "")).lower().lstrip(".")
         if not f_type and f_name:
             f_type = Path(f_name).suffix.lower().lstrip(".")
+
+        # A role the user chose at upload (template / source / dataset) is final, not inferred.
+        purpose = str((getattr(f, "purpose", None) if not isinstance(f, dict) else f.get("purpose")) or "").upper()
+        if purpose in _CHOSEN_ROLES:
+            results.append(
+                FileRoleClassification(
+                    file_id=f_id,
+                    filename=f_name,
+                    file_type=f_type,
+                    role=_CHOSEN_ROLES[purpose],
+                    confidence=1.0,
+                    reason=f"Role chosen by the user at upload ({purpose.lower()}).",
+                )
+            )
+            continue
 
         file_tuple = (f_id, f_name, f_type, f)
         if f_type in ("docx", "doc"):

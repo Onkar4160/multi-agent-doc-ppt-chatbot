@@ -1,0 +1,26 @@
+{
+  "_note": "Acceptance evaluation set (Stage 12). Each case runs plan -> write -> render -> re-open -> check offline (mocked LLM, deterministic claims). Claims stand in for a research dossier.",
+  "claims": [
+    {"id": "C1", "statement": "Community solar capacity reached 7.9 GW in 2024", "source_ids": [1], "question_ids": ["Q1"], "value": 7.9, "unit": "GW", "as_of": "2024"},
+    {"id": "C2", "statement": "Capacity was 5.6 GW in 2022", "source_ids": [2], "question_ids": ["Q1"], "value": 5.6, "unit": "GW", "as_of": "2022"},
+    {"id": "C3", "statement": "Subscribers save 10 percent on bills on average", "source_ids": [1], "question_ids": ["Q2"], "value": 10, "unit": "%"},
+    {"id": "C4", "statement": "Interconnection queues delay many projects", "source_ids": [3], "question_ids": ["Q3"]},
+    {"id": "C5", "statement": "Low-income carve-outs exist in several states", "source_ids": [3], "question_ids": ["Q4"]},
+    {"id": "C6", "statement": "The first state programme started in 2010", "source_ids": [4], "question_ids": ["Q4"], "as_of": "2010"},
+    {"id": "C7", "statement": "Federal tax credit adders arrived in 2022", "source_ids": [4], "question_ids": ["Q4"], "as_of": "2022"},
+    {"id": "C8", "statement": "Grid access reforms followed in 2024", "source_ids": [4], "question_ids": ["Q4"], "as_of": "2024"},
+    {"id": "C9", "statement": "Solar will be free by 2030", "status": "unsupported", "source_ids": [], "question_ids": ["Q2"]}
+  ],
+  "questions": {"Q1": "How large is the market?", "Q2": "What do subscribers save?", "Q3": "What are the barriers?", "Q4": "What policy supports exist?"},
+  "cases": [
+    {"id": "A1", "scenario": "S1", "format": "pptx", "brief": "Create a 6-slide deck on community solar for councils", "length": {"unit": "slides", "value": 6, "explicit": true}, "template": "Company_Template.pptx"},
+    {"id": "A2", "scenario": "S2", "format": "pptx", "brief": "Create a 10-slide deck on community solar", "length": {"unit": "slides", "value": 10, "explicit": true}, "template": "Green Cream Simple Aesthetic Watercolor Presentation.pptx"},
+    {"id": "A3", "scenario": "S1", "format": "pptx", "brief": "Create an 8-slide deck on community solar", "length": {"unit": "slides", "value": 8, "explicit": true}, "template": "presentation_Template.pptx"},
+    {"id": "A4", "scenario": "S3", "format": "pptx", "brief": "Create a 5-slide deck on community solar without a template", "length": {"unit": "slides", "value": 5, "explicit": true}, "template": null},
+    {"id": "A5", "scenario": "S4", "format": "pptx", "brief": "Make a deck on community solar for residents", "length": null, "template": null},
+    {"id": "A6", "scenario": "S5", "format": "docx", "brief": "Write a 3-page report on community solar", "length": {"unit": "pages", "value": 3, "explicit": true}, "template": "Company_Proposal.docx", "citation_style": "apa"},
+    {"id": "A7", "scenario": "S6", "format": "docx", "brief": "Write a report on community solar", "length": null, "template": "proposal_Template.docx", "citation_style": "numeric"},
+    {"id": "A8", "scenario": "S8", "format": "xlsx", "brief": "Build a workbook modelling community solar capacity", "length": null, "template": null},
+    {"id": "A9", "scenario": "S8", "format": "xlsx", "brief": "Build a 3-sheet workbook on community solar", "length": {"unit": "sheets", "value": 3, "explicit": true}, "template": null}
+  ]
+}
