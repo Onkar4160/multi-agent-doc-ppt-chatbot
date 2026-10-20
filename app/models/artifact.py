@@ -44,3 +44,6 @@ class ArtifactVersion(Base, TimestampMixin):
     diff_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list/dict of diff changes
     quality_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # QualityReport (DATA_MODELS §9.2)
     dossier_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # research_dossiers.id
+    # How the file was rendered (template path, template mode, design hint, photos by slide node ID) so an edit
+    # re-renders the next version with the same design and pictures (FR-EDIT-3, ADR-036).
+    render_json: Mapped[str | None] = mapped_column(Text, nullable=True)

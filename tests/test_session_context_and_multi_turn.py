@@ -333,7 +333,7 @@ def test_multi_turn_pipeline_and_llm_budget(sync_db):
     assert v2_model.sections[1].heading == "New Section"
 
     # Verify transparency header
-    assert res_edit["reply"].startswith("Edited: ")
+    assert res_edit["reply"].startswith("Updated **")
 
     # ── Turn 4: New Report ("create a new report on Renewable Energy") ──
     # Supervisor must route to generate

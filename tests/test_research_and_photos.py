@@ -127,9 +127,11 @@ def test_template_photo_frames_get_credited_photos(tmp_path):
     assert "Image: Photo: Creator" in sources
 
 
-def test_no_photos_without_frames_or_when_images_are_off(tmp_path):
+def test_photos_go_only_where_they_will_show_and_never_when_images_are_off(tmp_path):
     green = Path("data/sample_templates/Green Cream Simple Aesthetic Watercolor Presentation.pptx")
-    assert fetch_deck_photos(_deck(), green, None, tmp_path, provider=_openverse({"Electric Vehicle Charging": 5})) == {}
+    photos = fetch_deck_photos(_deck(), green, None, tmp_path, provider=_openverse({"Electric Vehicle Charging": 5}))
+    assert 0 not in photos  # the cover of this design has no photo slot: its artwork is kept as designed
+    assert all(b - a >= 2 for a, b in zip(sorted(photos), sorted(photos)[1:]))  # never two photo slides in a row
     assert fetch_deck_photos(_deck(), COMPANY, None, tmp_path) == {}  # MOCK_LLM test run: provider disabled
 
 

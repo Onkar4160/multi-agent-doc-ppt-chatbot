@@ -1,0 +1,246 @@
+2026-10-20 21:36:19,338 INFO [-] app.services.workspace_init: Analyzing configured default templates once at startup...
+2026-10-20 21:36:19,946 INFO [-] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:36:21,930 INFO [-] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 21:36:21,930 WARNING [-] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 21:36:23,939 INFO [-] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:38:19,575 INFO [-] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:38:19,583 INFO [-] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 115653 ms
+2026-10-20 21:38:21,840 INFO [-] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:38:36,440 INFO [-] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:38:36,440 INFO [-] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 14598 ms
+2026-10-20 21:38:36,546 INFO [-] app.services.workspace_init: Created and activated default workspace (id=1).
+2026-10-20 21:39:02,291 INFO [-] app.services.workspace_init: Active workspace matching configured template paths already active (id=1).
+2026-10-20 21:40:20,676 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:40:20,681 WARNING [run_4126902d51] app.llm.client: LLM model 'gemini-3.8-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:40:20,681 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:40:20,684 WARNING [run_4126902d51] app.llm.client: LLM model 'gemini-3.7-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:40:20,684 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:40:20,684 WARNING [run_4126902d51] app.llm.client: LLM model 'gemini-3.5-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:40:20,684 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:40:20,684 WARNING [run_4126902d51] app.llm.client: LLM model 'gemini-3.1-flash-lite' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:40:20,684 WARNING [run_4126902d51] app.agents.supervisor: Universal Semantic Planner LLM call unavailable (additionalProperties is not supported in the Gemini API.). Using semantic inference fallback.
+2026-10-20 21:40:20,726 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:40:23,593 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 21:40:23,595 WARNING [run_4126902d51] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 21:40:25,596 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:44:45,570 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:44:45,577 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 259989 ms
+2026-10-20 21:44:47,053 INFO [run_4126902d51] httpx: HTTP Request: GET https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=Semiconductor+market+in+2026&srlimit=3&format=json "HTTP/1.1 200 OK"
+2026-10-20 21:45:01,398 INFO [-] httpx: HTTP Request: GET https://export.arxiv.org/api/query?search_query=all%3Agenerate+AND+all%3Apresentation+AND+all%3Adocument+AND+all%3Asemiconductor+AND+all%3Amarket&start=0&max_results=2&sortBy=relevance "HTTP/1.1 200 OK"
+2026-10-20 21:45:02,617 INFO [-] httpx: HTTP Request: GET https://api.semanticscholar.org/graph/v1/paper/search?query=Can+you+generate+the+Presentation+and+document+on+%22Semiconductor+market+in+2026&limit=2&fields=title%2Cabstract%2Cyear%2Cvenue%2Cauthors%2CcitationCount%2Curl%2CexternalIds%2CpublicationDate%2Ctldr "HTTP/1.1 429 "
+2026-10-20 21:45:02,701 INFO [-] httpx: HTTP Request: GET https://api.openalex.org/works?search=Can+you+generate+the+Presentation+and+document+on+%22Semiconductor+market+in+2026&per_page=2&filter=has_abstract%3Atrue&select=id%2Cdoi%2Cdisplay_name%2Cpublication_year%2Cpublication_date%2Cprimary_location%2Cauthorships%2Ccited_by_count%2Cabstract_inverted_index%2Ctype "HTTP/1.1 200 OK"
+2026-10-20 21:45:02,837 WARNING [run_4126902d51] app.services.academic_search: Scholarly search via semantic_scholar skipped: semantic_scholar rate limit reached (add an API key to raise it)
+2026-10-20 21:45:04,640 INFO [run_4126902d51] httpx: HTTP Request: GET https://www.pwc.com/gx/en/industries/technology/pwc-semiconductor-and-beyond-2026-full-report.pdf "HTTP/1.1 403 Forbidden"
+2026-10-20 21:45:07,475 INFO [run_4126902d51] httpx: HTTP Request: GET https://www.deloitte.com/us/en/insights/industry/technology/technology-media-telecom-outlooks/semiconductor-industry-outlook.html "HTTP/1.1 200 OK"
+2026-10-20 21:45:09,314 INFO [run_4126902d51] httpx: HTTP Request: GET https://finance.yahoo.com/news/compound-semiconductor-materials-market-size-132200956.html "HTTP/1.1 200 OK"
+2026-10-20 21:45:09,633 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:46:05,272 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:46:05,277 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 55645 ms
+2026-10-20 21:46:05,278 INFO [run_4126902d51] app.agents.research_pipeline: Research: 7 sources, 14 evidence, 6 claims, coverage 3/4 answered, 1 conflicts (llm)
+2026-10-20 21:46:05,329 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:46:05,337 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:46:08,603 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 21:46:08,604 WARNING [run_4126902d51] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 21:46:10,607 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:46:58,480 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:46:58,487 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 47882 ms
+2026-10-20 21:48:54,281 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:48:54,325 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 168993 ms
+2026-10-20 21:48:54,335 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:53:13,647 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:53:13,653 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 259326 ms
+2026-10-20 21:53:45,297 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:54:15,508 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:54:15,649 INFO [run_4126902d51] app.services.docx_renderer: Successfully rendered DOCX to storage\outputs\Proposal_e52c0bc7.docx
+2026-10-20 21:54:15,682 INFO [run_4126902d51] app.services.versioning: Sync added Artifact 6 Version 1 saved at storage\artifacts\6\v1.docx
+2026-10-20 21:54:46,609 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:54:46,623 WARNING [run_ba0192966e] app.llm.client: LLM model 'gemini-3.8-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:54:46,623 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:54:46,625 INFO [run_4126902d51] httpx: HTTP Request: GET https://api.openverse.org/v1/images/?q=Semiconductor+market+in+2026+AI+infrastructure+high-bandwidth&page_size=8&license_type=commercial%2Cmodification&mature=false&aspect_ratio=wide "HTTP/1.1 200 OK"
+2026-10-20 21:54:46,635 INFO [run_4126902d51] app.services.images: No suitable photo found for 'Semiconductor market in 2026 AI infrastructure hig'
+2026-10-20 21:54:46,635 WARNING [run_ba0192966e] app.llm.client: LLM model 'gemini-3.7-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:54:46,638 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:54:46,645 WARNING [run_ba0192966e] app.llm.client: LLM model 'gemini-3.5-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:54:46,651 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:54:46,662 WARNING [run_ba0192966e] app.llm.client: LLM model 'gemini-3.1-flash-lite' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 21:54:46,662 WARNING [run_ba0192966e] app.agents.supervisor: Universal Semantic Planner LLM call unavailable (additionalProperties is not supported in the Gemini API.). Using semantic inference fallback.
+2026-10-20 21:54:46,718 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:54:48,681 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 21:54:48,689 WARNING [run_ba0192966e] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 21:54:50,691 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:55:16,638 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:55:46,857 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:56:17,173 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:56:47,579 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:56:47,596 INFO [run_ba0192966e] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 116910 ms
+2026-10-20 21:56:47,707 INFO [run_ba0192966e] app.agents.web_research: Loaded search results from disk cache for query 'semiconductor market size forecast 2026'.
+2026-10-20 21:56:47,722 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:57:05,751 INFO [-] httpx: HTTP Request: GET https://api.openalex.org/works?search=Can+you+generate+the+Presentation+on+%22Semiconductor+market+in+2026&per_page=2&filter=has_abstract%3Atrue&select=id%2Cdoi%2Cdisplay_name%2Cpublication_year%2Cpublication_date%2Cprimary_location%2Cauthorships%2Ccited_by_count%2Cabstract_inverted_index%2Ctype "HTTP/1.1 200 OK"
+2026-10-20 21:57:09,017 INFO [-] httpx: HTTP Request: GET https://export.arxiv.org/api/query?search_query=all%3Agenerate+AND+all%3Apresentation+AND+all%3Asemiconductor+AND+all%3Amarket+AND+all%3A2026&start=0&max_results=2&sortBy=relevance "HTTP/1.1 200 OK"
+2026-10-20 21:57:16,393 INFO [-] httpx: HTTP Request: GET https://api.semanticscholar.org/graph/v1/paper/search?query=Can+you+generate+the+Presentation+on+%22Semiconductor+market+in+2026&limit=2&fields=title%2Cabstract%2Cyear%2Cvenue%2Cauthors%2CcitationCount%2Curl%2CexternalIds%2CpublicationDate%2Ctldr "HTTP/1.1 429 "
+2026-10-20 21:57:16,500 WARNING [run_ba0192966e] app.services.academic_search: Scholarly search via semantic_scholar skipped: semantic_scholar rate limit reached (add an API key to raise it)
+2026-10-20 21:57:18,607 WARNING [run_4126902d51] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 21:57:19,780 INFO [run_ba0192966e] httpx: HTTP Request: GET https://www.deloitte.com/us/en/insights/industry/technology/technology-media-telecom-outlooks/semiconductor-industry-outlook.html "HTTP/1.1 200 OK"
+2026-10-20 21:57:21,503 INFO [run_ba0192966e] httpx: HTTP Request: GET https://www.gartner.com/en/newsroom/press-releases/2026-08-24-gartner-forecasts-worldwide-semiconductor-revenue-to-reach-1-trillion-dollars-in-2026 "HTTP/1.1 403 Forbidden"
+2026-10-20 21:57:21,815 WARNING [run_4126902d51] app.services.renderers.pptx_clone: Template text fit: content:references-1 - text does not fit at minimum size
+2026-10-20 21:57:22,162 INFO [run_4126902d51] app.services.pptx_renderer: Rendered PPTX deck with 10 slides from template sample slides to storage\outputs\Deck_12c6186e.pptx
+2026-10-20 21:57:22,844 INFO [run_4126902d51] app.agents.graph: Deck has 1 fit problems; asking the generator to shorten
+2026-10-20 21:57:22,949 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:57:31,196 INFO [run_ba0192966e] httpx: HTTP Request: GET https://dalrada.com/semiconductor-sales-surge-in-2025-what-it-signals-for-2026 "HTTP/1.1 403 Forbidden"
+2026-10-20 21:57:31,212 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:57:33,239 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 21:57:33,239 WARNING [run_4126902d51] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 21:57:35,245 INFO [run_4126902d51] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 21:58:03,848 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 21:58:03,848 INFO [run_ba0192966e] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 32640 ms
+2026-10-20 21:58:03,858 INFO [run_ba0192966e] app.agents.research_pipeline: Research: 9 sources, 14 evidence, 4 claims, coverage 2/4 answered, 1 conflicts (llm)
+2026-10-20 21:58:03,924 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:00:02,878 INFO [run_4126902d51] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:00:02,903 INFO [run_4126902d51] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 147666 ms
+2026-10-20 22:00:07,299 WARNING [run_4126902d51] app.services.renderers.pptx_clone: Template text fit: content:references-1 - text does not fit at minimum size
+2026-10-20 22:00:07,984 INFO [run_4126902d51] app.services.pptx_renderer: Rendered PPTX deck with 10 slides from template sample slides to storage\outputs\Deck_12c6186e.pptx
+2026-10-20 22:00:09,260 INFO [run_4126902d51] app.services.versioning: Sync added Artifact 7 Version 1 saved at storage\artifacts\7\v1.pptx
+2026-10-20 22:00:09,334 INFO [run_4126902d51] app.api.chat: Run finished: status=done llm_calls=13 cache_hits=0
+2026-10-20 22:00:19,166 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:00:19,174 INFO [run_ba0192966e] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 135253 ms
+2026-10-20 22:00:50,608 WARNING [run_ba0192966e] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 22:01:11,707 INFO [run_ba0192966e] httpx: HTTP Request: GET https://api.openverse.org/v1/images/?q=Geopolitical+export+controls&page_size=8&license_type=commercial%2Cmodification&mature=false&aspect_ratio=wide "HTTP/1.1 200 OK"
+2026-10-20 22:01:11,707 INFO [run_ba0192966e] app.services.images: No suitable photo found for 'Geopolitical export controls'
+2026-10-20 22:01:41,708 WARNING [run_ba0192966e] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 22:01:45,210 WARNING [run_ba0192966e] app.services.renderers.pptx_clone: Template text fit: content:references-1 - text does not fit at minimum size
+2026-10-20 22:01:45,214 WARNING [run_ba0192966e] app.services.renderers.pptx_clone: Template text fit: content:references-2 - text does not fit at minimum size
+2026-10-20 22:01:45,650 INFO [run_ba0192966e] app.services.pptx_renderer: Rendered PPTX deck with 9 slides from template sample slides to storage\outputs\Deck_02485abd.pptx
+2026-10-20 22:01:46,710 INFO [run_ba0192966e] app.agents.graph: Deck has 1 fit problems; asking the generator to shorten
+2026-10-20 22:01:46,715 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:01:58,354 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:01:58,356 WARNING [run_ba0192966e] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:02:00,363 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:02:10,204 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:02:10,206 WARNING [run_ba0192966e] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=2/3, 503); retrying in 4.0s
+2026-10-20 22:02:14,208 INFO [run_ba0192966e] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:10:04,588 INFO [run_ba0192966e] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:10:04,588 INFO [run_ba0192966e] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 470393 ms
+2026-10-20 22:10:08,226 WARNING [run_ba0192966e] app.services.renderers.pptx_clone: Template text fit: content:references-1 - text does not fit at minimum size
+2026-10-20 22:10:08,226 WARNING [run_ba0192966e] app.services.renderers.pptx_clone: Template text fit: content:references-2 - text does not fit at minimum size
+2026-10-20 22:10:08,629 INFO [run_ba0192966e] app.services.pptx_renderer: Rendered PPTX deck with 9 slides from template sample slides to storage\outputs\Deck_02485abd.pptx
+2026-10-20 22:10:09,592 INFO [run_ba0192966e] app.services.versioning: Sync added Artifact 8 Version 1 saved at storage\artifacts\8\v1.pptx
+2026-10-20 22:10:09,652 INFO [run_ba0192966e] app.api.chat: Run finished: status=done llm_calls=11 cache_hits=0
+2026-10-20 22:10:13,350 INFO [-] app.services.workspace_init: Active workspace matching configured template paths already active (id=1).
+2026-10-20 22:10:16,768 INFO [-] app.services.workspace_init: Active workspace matching configured template paths already active (id=1).
+2026-10-20 22:24:08,402 INFO [-] app.services.workspace_init: Active workspace matching configured template paths already active (id=1).
+2026-10-20 22:24:25,687 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:24:25,701 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.8-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 22:24:25,702 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:24:25,709 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.7-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 22:24:25,710 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:24:25,716 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.5-flash' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 22:24:25,717 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:24:25,725 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.1-flash-lite' failed (additionalProperties is not supported in the Gemini API.); trying fallback
+2026-10-20 22:24:25,726 WARNING [run_9f5644cf15] app.agents.supervisor: Universal Semantic Planner LLM call unavailable (additionalProperties is not supported in the Gemini API.). Using semantic inference fallback.
+2026-10-20 22:24:25,827 INFO [run_9f5644cf15] app.llm.client: LLM cache hit for JSON schema ResearchPlanSchema (c50829987547)
+2026-10-20 22:24:25,837 INFO [run_9f5644cf15] app.agents.web_research: Loaded search results from disk cache for query 'semiconductor market size forecast 2026'.
+2026-10-20 22:24:25,837 INFO [run_9f5644cf15] app.agents.web_research: Loaded search results from disk cache for query 'semiconductor market key drivers 2026'.
+2026-10-20 22:24:25,837 INFO [run_9f5644cf15] app.agents.web_research: Loaded search results from disk cache for query 'global semiconductor industry outlook 2026'.
+2026-10-20 22:24:25,837 INFO [run_9f5644cf15] app.agents.web_research: Loaded search results from disk cache for query 'AI automotive semiconductor growth 2026'.
+2026-10-20 22:24:27,228 INFO [-] httpx: HTTP Request: GET https://www.pwc.com/gx/en/industries/technology/pwc-semiconductor-and-beyond-2026-full-report.pdf "HTTP/1.1 403 Forbidden"
+2026-10-20 22:24:27,443 INFO [-] httpx: HTTP Request: GET https://www.deloitte.com/us/en/insights/industry/technology/technology-media-telecom-outlooks/semiconductor-industry-outlook.html "HTTP/1.1 200 OK"
+2026-10-20 22:24:27,543 INFO [-] httpx: HTTP Request: GET https://finance.yahoo.com/news/compound-semiconductor-materials-market-size-132200956.html "HTTP/1.1 200 OK"
+2026-10-20 22:24:27,948 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:26,182 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:27:26,189 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.8-flash' completed in 178245 ms
+2026-10-20 22:27:26,198 INFO [run_9f5644cf15] app.agents.research_pipeline: Research: 9 sources, 11 evidence, 6 claims, coverage 2/4 answered, 1 conflicts (llm)
+2026-10-20 22:27:26,269 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:26,270 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:27,239 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 429 Too Many Requests"
+2026-10-20 22:27:27,239 WARNING [run_9f5644cf15] app.llm.client: model=gemini-3.8-flash skipped for 843 min (quota exhausted)
+2026-10-20 22:27:27,239 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:27,881 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent "HTTP/1.1 429 Too Many Requests"
+2026-10-20 22:27:27,881 WARNING [run_9f5644cf15] app.llm.client: model=gemini-3.7-flash skipped for 843 min (quota exhausted)
+2026-10-20 22:27:27,881 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:28,656 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:27:28,656 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.8-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:27:30,664 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:31,497 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent "HTTP/1.1 429 Too Many Requests"
+2026-10-20 22:27:31,497 WARNING [run_9f5644cf15] app.llm.client: model=gemini-3.8-flash skipped for 842 min (quota exhausted)
+2026-10-20 22:27:31,497 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:38,762 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:27:38,762 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:27:40,765 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:27:46,294 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:27:46,294 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.5-flash' completed in 14796 ms
+2026-10-20 22:27:46,302 INFO [run_9f5644cf15] app.agents.ppt_generator: Deck conformed to its plan: slide 2 written from its plan; slide 3 written from its plan; slide 4 written from its plan; slide 5 written from its plan; slide 6 written from its plan; slide 7 written from its plan
+2026-10-20 22:28:01,792 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:28:01,798 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.5-flash' completed in 21034 ms
+2026-10-20 22:28:01,802 WARNING [run_9f5644cf15] app.agents.doc_generator: Section batch 1 failed: 1 validation error for SectionBatch
+  Invalid JSON: EOF while parsing a value at line 1 column 0 [type=json_invalid, input_value='', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/json_invalid. Retrying once with the error.
+2026-10-20 22:28:01,802 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:28:04,599 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:28:04,599 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:28:06,602 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:28:42,727 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:28:42,727 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=2/3, 503); retrying in 4.0s
+2026-10-20 22:28:46,737 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:28:58,865 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:28:58,866 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.5-flash' completed in 12134 ms
+2026-10-20 22:28:58,873 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:29:11,635 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:29:11,639 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:29:13,640 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:29:14,996 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:29:14,996 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=2/3, 503); retrying in 4.0s
+2026-10-20 22:29:19,000 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:29:32,906 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:29:32,907 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.5-flash' failed (503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}); trying fallback
+2026-10-20 22:29:32,908 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:31:53,111 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:31:53,123 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.1-flash-lite' completed in 140218 ms
+2026-10-20 22:31:53,123 WARNING [run_9f5644cf15] app.agents.doc_generator: Section batch 2 failed: 1 validation error for SectionBatch
+  Invalid JSON: EOF while parsing a string at line 2 column 403135 [type=json_invalid, input_value='{\n  "executive_summary"...ur clients and partners', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/json_invalid. Retrying once with the error.
+2026-10-20 22:31:53,144 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:32:15,024 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:32:15,024 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:32:17,032 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:32:32,564 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:32:32,567 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=2/3, 503); retrying in 4.0s
+2026-10-20 22:32:36,569 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:32:38,970 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:32:38,970 WARNING [run_9f5644cf15] app.llm.client: LLM model 'gemini-3.5-flash' failed (503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}); trying fallback
+2026-10-20 22:32:38,970 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:34:56,823 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:34:56,839 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.1-flash-lite' completed in 137864 ms
+2026-10-20 22:34:56,847 ERROR [run_9f5644cf15] app.agents.graph: Error in node 'generate_doc_node': 1 validation error for SectionBatch
+  Invalid JSON: EOF while parsing a string at line 2 column 339858 [type=json_invalid, input_value='{\n  "executive_summary"...ond for the industry as', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/json_invalid
+Traceback (most recent call last):
+  File "C:\Users\Onkar\OneDrive\Desktop\AI_MultiAgent_Chatbot\multi-agent-doc-ppt-chatbot\app\agents\graph.py", line 139, in wrapper
+    res_state = func(state)
+                ^^^^^^^^^^^
+  File "C:\Users\Onkar\OneDrive\Desktop\AI_MultiAgent_Chatbot\multi-agent-doc-ppt-chatbot\app\agents\graph.py", line 946, in node_generate_doc
+    doc_model = generate_document_model(
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Onkar\OneDrive\Desktop\AI_MultiAgent_Chatbot\multi-agent-doc-ppt-chatbot\app\agents\doc_generator.py", line 194, in generate_document_model
+    batch = llm_client.generate_json(prompt=prompt + f"\nCRITICAL FIX REQUIRED: the previous attempt failed: {exc}",
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Onkar\OneDrive\Desktop\AI_MultiAgent_Chatbot\multi-agent-doc-ppt-chatbot\app\llm\client.py", line 196, in generate_json
+    result = schema.model_validate_json(raw)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Onkar\OneDrive\Desktop\AI_MultiAgent_Chatbot\multi-agent-doc-ppt-chatbot\.venv\Lib\site-packages\pydantic\main.py", line 845, in model_validate_json
+    return cls.__pydantic_validator__.validate_json(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 1 validation error for SectionBatch
+  Invalid JSON: EOF while parsing a string at line 2 column 339858 [type=json_invalid, input_value='{\n  "executive_summary"...ond for the industry as', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/json_invalid
+2026-10-20 22:34:56,901 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:35:30,236 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-10-20 22:35:30,237 WARNING [run_9f5644cf15] app.llm.client: LLM call failed (model=gemini-3.5-flash attempt=1/3, 503); retrying in 2.0s
+2026-10-20 22:35:32,239 INFO [run_9f5644cf15] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-10-20 22:35:56,475 INFO [run_9f5644cf15] httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-10-20 22:35:56,479 INFO [run_9f5644cf15] app.llm.client: LLM call to model 'gemini-3.5-flash' completed in 24241 ms
+2026-10-20 22:35:56,479 INFO [run_9f5644cf15] app.agents.ppt_generator: Deck conformed to its plan: slide 2 written from its plan; slide 3 written from its plan; slide 4 written from its plan; slide 5 written from its plan; slide 6 written from its plan
+2026-10-20 22:36:05,387 WARNING [-] app.services.images: Photo search skipped: openverse request failed: ReadTimeout
+2026-10-20 22:36:08,851 WARNING [run_9f5644cf15] app.services.renderers.pptx_clone: Template text fit: content:references-1 - text does not fit at minimum size
+2026-10-20 22:36:09,219 INFO [run_9f5644cf15] app.services.pptx_renderer: Rendered PPTX deck with 8 slides from template sample slides to storage\outputs\Deck_e966ed64.pptx
+2026-10-20 22:36:09,768 INFO [run_9f5644cf15] app.services.versioning: Sync added Artifact 9 Version 1 saved at storage\artifacts\9\v1.pptx
+2026-10-20 22:36:09,859 INFO [run_9f5644cf15] app.api.chat: Run finished: status=done llm_calls=25 cache_hits=1

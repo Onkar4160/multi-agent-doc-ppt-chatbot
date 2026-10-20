@@ -98,6 +98,52 @@ class UpdateTitleOp(BaseModel):
     subtitle: str | None = Field(default=None, description="New overarching document/deck subtitle.")
 
 
+class UpdatePointOp(BaseModel):
+    """Rewrite one point (bullet) of a slide; everything else on the slide stays as it is."""
+
+    type: Literal["update_point"] = "update_point"
+    slide_index: int = Field(description="1-based slide index.")
+    point_index: int = Field(description="1-based index of the point on that slide, as numbered in the outline.")
+    new_text: str = Field(description="The point's new text (plain text, no citation markers).")
+    source_ids: list[int] | None = Field(default=None, description="Citations; omit to keep the point's own.")
+
+
+class AddPointOp(BaseModel):
+    """Add one point to a slide."""
+
+    type: Literal["add_point"] = "add_point"
+    slide_index: int = Field(description="1-based slide index.")
+    after_point: int = Field(default=-1, description="Insert after this 1-based point; 0 = first, -1 = last.")
+    text: str = Field(description="The new point.")
+    source_ids: list[int] = Field(default_factory=list)
+
+
+class DeletePointOp(BaseModel):
+    """Remove one point from a slide."""
+
+    type: Literal["delete_point"] = "delete_point"
+    slide_index: int = Field(description="1-based slide index.")
+    point_index: int = Field(description="1-based index of the point to remove.")
+
+
+class UpdateSlideTextOp(BaseModel):
+    """Change one text field of a slide (its title, subtitle or speaker notes) and nothing else."""
+
+    type: Literal["update_slide_text"] = "update_slide_text"
+    slide_index: int = Field(description="1-based slide index.")
+    field: Literal["title", "subtitle", "notes"] = Field(description="Which field to change.")
+    new_text: str
+
+
+class ReplaceTextOp(BaseModel):
+    """Replace a phrase wherever it occurs inside one slide or section (a precise wording or figure change)."""
+
+    type: Literal["replace_text"] = "replace_text"
+    node_id: str = Field(description="node_id of the slide or section, from the outline.")
+    find: str = Field(description="Exact text as it appears in the outline.")
+    replace: str = Field(description="Replacement text.")
+
+
 from app.models.workbook_model import CellModel, SheetModel, TableModel
 
 
@@ -144,6 +190,11 @@ class DeleteSheetOp(BaseModel):
 
 
 Op = Union[
+    UpdatePointOp,
+    AddPointOp,
+    DeletePointOp,
+    UpdateSlideTextOp,
+    ReplaceTextOp,
     AddSectionOp,
     UpdateSectionOp,
     UpdateParagraphOp,
@@ -169,3 +220,7 @@ class EditPlan(BaseModel):
     target: Literal["docx", "pptx", "xlsx", "both"] = Field(description="Target artifact format being modified.")
     ops: list[Op] = Field(default_factory=list, description="List of granular edit operations.")
     summary: str = Field(description="Human-readable summary of the intended changes.")
+    scope_node_ids: list[str] = Field(
+        default_factory=list,
+        description="node_ids of every slide/section/sheet these ops change (from the outline); all others stay identical.",
+    )

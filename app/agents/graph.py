@@ -239,6 +239,16 @@ def node_plan(state: GraphState) -> GraphState:
                 user_instruction=user_msg,
             )
 
+            if not tmpl_res.is_valid and tmpl_res.error_code == "TEMPLATE_FILE_REQUIRED":
+                # "use my template" with nothing attached never blocks the request: the default template is used.
+                fallback = resolve_templates(template_mode="DEFAULT", artifact_types=plan_obj.artifact_types,
+                                             file_ids=[], uploaded_files=[], active_workspace=active_ws, user_instruction=user_msg)
+                if fallback.is_valid:
+                    plan_obj.template_mode = "DEFAULT"
+                    state["notes"] = list(state.get("notes", [])) + [
+                        "No template file was attached, so I used the default template. Attach one (📎) and say "
+                        "“use this template” to restyle it."]
+                    tmpl_res = fallback
             if not tmpl_res.is_valid and tmpl_res.error_code == "INVALID_TEMPLATE_TYPE":
                 # An attachment of another format (e.g. the deck's PPTX) cannot style this output: keep the
                 # attachment for the formats it fits and use the default template for the rest, and say so.
@@ -290,7 +300,7 @@ def node_plan(state: GraphState) -> GraphState:
 
 def _interpret_and_track(state: GraphState, plan_obj: Any, session_ctx: Any) -> None:
     """Interpret the message in its conversation (Stage 4), apply the clarification policy, update task state."""
-    from app.agents.interpreter import interpret, interpretation_summary, refers_to_artifact, resolve_subject
+    from app.agents.interpreter import interpret, interpretation_summary, refers_to_artifact
     from app.models.context import ConversationContext
     from app.models.execution_plan import OperationType
     from app.services.session_context import load_active_model
@@ -315,13 +325,10 @@ def _interpret_and_track(state: GraphState, plan_obj: Any, session_ctx: Any) -> 
         )
         state["interpretation"] = interpretation_summary(interp)
 
-        # Conversation continuity: "a report on him" continues the earlier subject (FR-CONV).
-        if interp.kind in ("continue_task", "new_task", "change_objective", "question"):
-            prior = (context.active_artifact or {}).get("title") or context.current_topic
-            resolved = resolve_subject(message, prior)
-            if resolved:
-                plan_obj.topic = resolved
-                state["user_message"] = resolved
+        # Conversation continuity: the subject comes from the whole conversation ("on this same", "on him",
+        # "use this template and give me the presentation as same"), never from the referring words (ADR-035).
+        if interp.kind in ("continue_task", "new_task", "change_objective", "question", "clarification_answer", "regenerate"):
+            _resolve_subject(state, plan_obj, interp, context, message)
         # Edits address exactly the resolved units, so nothing else may change (FR-EDIT-3).
         if interp.change and not getattr(plan_obj, "target_nodes", None):
             ids = [t.node_id for t in interp.change.scope.targets if t.node_id]
@@ -355,6 +362,38 @@ def _interpret_and_track(state: GraphState, plan_obj: Any, session_ctx: Any) -> 
     finally:
         if db_sess:
             db_sess.close()
+
+
+def _resolve_subject(state: GraphState, plan_obj: Any, interp: Any, context: Any, message: str) -> None:
+    """Write the resolved subject and stand-alone request into the plan; ask when there is no subject at all."""
+    from app.services.conversation_memory import resolve_request
+
+    offline = bool(getattr(get_llm_client(), "_mock_mode", False))  # the offline planner never resolves references
+    text = state.get("user_message", "") if interp.kind == "clarification_answer" else message
+    fmt = (interp.output_spec.format if interp.output_spec else "") or ""
+    noun = {"pptx": "presentation", "docx": "document", "xlsx": "workbook"}.get(fmt, "file")
+    rr = resolve_request(
+        text, context,
+        planner_subject="" if offline else getattr(plan_obj, "subject", ""),
+        planner_standalone="" if offline else getattr(plan_obj, "user_instruction", ""),
+        deliverable=noun,
+    )
+    has_sources = bool(state.get("file_ids") or getattr(plan_obj, "source_file_ids", None))
+    if rr.missing:
+        if interp.kind in ("new_task", "continue_task") and not has_sources and not plan_obj.error:
+            plan_obj.error = "CLARIFICATION_NEEDED"
+            plan_obj.clarification_needed = f"Happy to build the {noun}. What should it be about?"
+        return
+    plan_obj.subject = rr.subject
+    if interp.kind == "question":
+        plan_obj.resolved_message = rr.standalone
+        return
+    plan_obj.user_instruction = rr.standalone
+    plan_obj.topic = rr.standalone
+    state["user_message"] = rr.standalone
+    state["subject"] = rr.subject
+    if rr.referential:
+        state["notes"] = list(state.get("notes", [])) + [f"Continuing with the subject of this chat: **{rr.subject}**."]
 
 
 @traced("stub_node")
@@ -715,8 +754,9 @@ def node_plan_content(state: GraphState) -> GraphState:
     audience = spec.get("audience", "")
     doc_type = plan_data.get("document_type", "proposal")
     valid = {int(k) for k in (state.get("registry") or {}).keys()} or None
+    subject = plan_data.get("subject") or state.get("subject") or ""
     common = dict(document_type=doc_type, audience=audience, limitations=state.get("limitations", []),
-                  questions=state.get("questions", {}), valid_sources=valid)
+                  questions=state.get("questions", {}), valid_sources=valid, subject=subject)
     plans: dict[str, Any] = {}
     reports: dict[str, Any] = {}
     jobs: dict[str, Any] = {}
@@ -738,7 +778,7 @@ def node_plan_content(state: GraphState) -> GraphState:
                         dict(detail=detail, template_outline=outline, **common))
     if "xlsx" in outputs:
         stated = length if (length or {}).get("unit") == "sheets" else None
-        jobs["xlsx"] = (plan_workbook, (brief, claims, workbook_length(stated, 0) if stated else None), dict(valid_sources=valid))
+        jobs["xlsx"] = (plan_workbook, (brief, claims, workbook_length(stated, 0) if stated else None), dict(valid_sources=valid, subject=subject))
     # Plans are independent: one planner call per format, run side by side (wall time = the slowest call).
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
@@ -1039,18 +1079,39 @@ def _no_template(state: GraphState) -> bool:
     return str((state.get("plan") or {}).get("template_mode", "")).upper().endswith("NONE")
 
 
+# A shorten round is one more full deck-writing call (often 1-2 minutes): only worth it while the run is young.
+SHORTEN_TIME_LIMIT_S = 180
+RETRY_TIME_LIMIT_S = 240  # a validation retry rewrites a whole format: skipped once the run is this old
+
+
+def design_hint(state: GraphState) -> str:
+    """Tone, audience and request words that choose the generated design's preset (no-template decks)."""
+    spec = (state.get("interpretation") or {}).get("output_spec") or {}
+    return " ".join(str(spec.get(k, "")) for k in ("tone", "audience", "purpose")) + " " + state.get("user_message", "")
+
+
 def _render_checked_deck(
-    state: GraphState, deck_model: DeckModel, tmpl_path: Any, profile: Any, out_path: Path, sources_map: dict
+    state: GraphState, deck_model: DeckModel, tmpl_path: Any, profile: Any, out_path: Path, sources_map: dict,
+    photos_out: dict | None = None,
 ) -> DeckModel:
-    """Render, check the file, and when text does not fit, re-plan once with "shorten" instructions."""
+    """Render, check the file, and when text does not fit, re-plan once with "shorten" instructions.
+
+    ``photos_out`` receives the photos placed ({slide index: PhotoAsset}) so the version can keep them.
+    """
     from app.services.images import fetch_deck_photos
 
-    photos = fetch_deck_photos(deck_model, tmpl_path, profile, out_path.parent / "media") if tmpl_path else {}
-    spec = (state.get("interpretation") or {}).get("output_spec") or {}
-    hint = " ".join(str(spec.get(k, "")) for k in ("tone", "audience", "purpose")) + " " + state.get("user_message", "")
+    photos = fetch_deck_photos(deck_model, tmpl_path, profile, out_path.parent / "media",
+                               subject=state.get("subject") or "")
+    if photos_out is not None:
+        photos_out.update(photos)
+    hint = design_hint(state)
     render_pptx(deck_model, tmpl_path, profile, out_path, sources_map=sources_map, photos=photos, design_hint=hint)
     issues = validate_pptx_file(out_path, tmpl_path)
     fit = fit_problems(issues)
+    elapsed = time.monotonic() - (state.get("started_at") or time.monotonic())
+    if fit and elapsed > SHORTEN_TIME_LIMIT_S:
+        logger.info("Skipping the shorten round: %.0f s spent already; the fitter's smaller type is kept", elapsed)
+        fit = []
     if fit:
         logger.info("Deck has %d fit problems; asking the generator to shorten", len(fit))
         try:
@@ -1222,8 +1283,9 @@ def node_finalize(state: GraphState) -> GraphState:
             ppt_profile = TemplateProfile(colors={"primary": "#000000"})
 
     sources_map = state.get("registry", {})
-    output_dir = Path("data/outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    from app.services.render_context import RenderContext, deck_photos_by_node, keep_document_figures, output_dir as _out
+
+    output_dir = _out()
     artifacts_created: list[dict[str, Any]] = []
 
     session_id = state.get("session_id")
@@ -1272,6 +1334,7 @@ def node_finalize(state: GraphState) -> GraphState:
                     db_sess.add(art)
                     db_sess.flush()
                     art_id = art.id
+                    keep_document_figures(doc_model, art_id)
 
                     ver = create_version_sync(
                         db=db_sess,
@@ -1284,6 +1347,8 @@ def node_finalize(state: GraphState) -> GraphState:
                     )
                     ver.dossier_id = state.get("dossier_id")
                     ver.quality_json = _safe_quality(state, "docx", out_docx, doc_model)
+                    ver.render_json = RenderContext(template_path=str(doc_tmpl_path) if doc_tmpl_path else None,
+                                                    template_file_id=(state.get("plan") or {}).get("doc_template_file_id")).to_json()
                     db_sess.commit()
 
                     artifacts_created.append({
@@ -1303,7 +1368,9 @@ def node_finalize(state: GraphState) -> GraphState:
         if deck_model_dict:
             deck_model = DeckModel.model_validate(deck_model_dict)
             out_pptx = output_dir / f"Deck_{uuid.uuid4().hex[:8]}.pptx"
-            deck_model = _render_checked_deck(state, deck_model, ppt_tmpl_path, ppt_profile, out_pptx, sources_map)
+            deck_photos: dict[int, Any] = {}
+            deck_model = _render_checked_deck(state, deck_model, ppt_tmpl_path, ppt_profile, out_pptx, sources_map,
+                                              photos_out=deck_photos)
 
             if db_sess:
                 try:
@@ -1330,6 +1397,11 @@ def node_finalize(state: GraphState) -> GraphState:
                     )
                     ver.dossier_id = state.get("dossier_id")
                     ver.quality_json = _safe_quality(state, "pptx", out_pptx, deck_model)
+                    ver.render_json = RenderContext(
+                        template_path=str(ppt_tmpl_path) if ppt_tmpl_path else None,
+                        template_file_id=(state.get("plan") or {}).get("ppt_template_file_id"),
+                        mode="template" if ppt_tmpl_path else "generated", design_hint=design_hint(state),
+                        photos=deck_photos_by_node(deck_model, deck_photos, art_id)).to_json()
                     db_sess.commit()
 
                     artifacts_created.append({
@@ -1401,18 +1473,22 @@ def node_finalize(state: GraphState) -> GraphState:
         state["reply"] = ensure_reply({"failure": state.get("failure")})
         state["artifacts"] = []
         return state
-    elif errors:
-        reply_parts = ["### Generation PARTIAL\n"]
-    else:
-        kinds_str = ", ".join(sorted(set(a["kind"] for a in artifacts_created)))
-        first_title = artifacts_created[0]["title"] if artifacts_created else "Report"
-        reply_parts = [f"Created NEW report: {first_title} ({kinds_str})\n"]
 
-    if artifacts_created:
-        reply_parts.append("**Generated Artifacts:**")
-        for a in artifacts_created:
-            reply_parts.append(f"- [{a['kind'].upper()}] **{a['title']}** ([Download]({a['download_url']}))")
-        reply_parts.append("")
+    templates = {"pptx": _template_label(state, ppt_tmpl_path, "pptx") if deck_model_dict else "",
+                 "docx": _template_label(state, doc_tmpl_path, "docx") if doc_model_dict else ""}
+    reply_parts = [_headline_for(artifacts_created), ""]
+    for a in artifacts_created:
+        size = _size_label(state, a["kind"])
+        extra = " · ".join(x for x in (size, templates.get(a["kind"], "")) if x)
+        reply_parts.append(f"- {_ICON.get(a['kind'], '📎')} **{a['title']}**" + (f" — {extra}" if extra else "")
+                           + f" · [Download]({a['download_url']})")
+    reply_parts.append("")
+    made = {a["kind"] for a in artifacts_created}
+    for fmt in (state.get("plan") or {}).get("outputs", []):
+        if fmt not in made:  # asked for but not delivered: say so plainly instead of staying silent
+            why = next((e.split(": ", 1)[-1] for e in errors if fmt in e.lower()), "") or state.get("failure") or \
+                "it could not be built on this attempt"
+            reply_parts.append(f"> ⚠️ The {_NOUN.get(fmt, fmt)} was not created: {why}. Say “try again” to retry.")
 
     if state.get("research_summary"):
         reply_parts.append(state["research_summary"])
@@ -1424,18 +1500,21 @@ def node_finalize(state: GraphState) -> GraphState:
         reply_parts.append(plan_line)
         reply_parts.append("")
     if sources_map:
-        reply_parts.append(f"**Citations ({len(sources_map)} Sources Registered):**")
+        reply_parts.append(f"**Sources ({len(sources_map)}):**")
         for sid, s in list(sources_map.items())[:5]:
-            reply_parts.append(f"- `[{sid}]` {s.get('title')} ({s.get('url')})")
+            url = s.get("url") or s.get("url_or_filename") or ""
+            reply_parts.append(f"- `[{sid}]` {s.get('title')}" + (f" ({url})" if url else ""))
         if len(sources_map) > 5:
-            reply_parts.append(f"  *...and {len(sources_map) - 5} additional sources.*")
+            reply_parts.append(f"  *…and {len(sources_map) - 5} more, listed at the end of the file.*")
 
     # Add warnings if any degradation occurred
     errors = state.get("errors", [])
     if errors:
-        reply_parts.append("\n> **Note / Warnings:**")
+        reply_parts.append("\n> **Note:**")
         for err in errors:
             reply_parts.append(f"> - {err}")
+    reply_parts.append("")
+    reply_parts.append(_next_steps(artifacts_created))
 
     state["reply"] = "\n".join(reply_parts)
     state["artifacts"] = artifacts_created
@@ -1627,7 +1706,7 @@ def node_edit(state: GraphState) -> GraphState:
             v_changes = ", ".join(f"v{a['old_version']} -> v{a['version']}" for a in edited_artifacts)
             first_title = target_info[0]["title"]
 
-            reply_lines = [f"Edited: {first_title} {v_changes} ({kinds_str})\n"]
+            reply_lines = [f"Updated **{first_title}** ({v_changes}).\n"]
             if warning_msg:
                 reply_lines.append(f"{warning_msg}\n")
             if is_ambiguous:
@@ -1644,7 +1723,16 @@ def node_edit(state: GraphState) -> GraphState:
                     reply_lines.append(f"- Changed: {', '.join(diff['changed'])}")
                 if diff.get("removed"):
                     reply_lines.append(f"- Removed: {', '.join(diff['removed'])}")
-                reply_lines.append(f"- [Download Updated File]({ea['download_url']})\n")
+                reg = diff.get("regression") or {}
+                kept = len(diff.get("unchanged_nodes") or [])
+                if reg.get("restored_out_of_scope"):
+                    reply_lines.append(f"- Kept as before (not part of your request): "
+                                       f"{', '.join(_unit_label(u) for u in reg['restored_out_of_scope'])}")
+                if not diff.get("added") and not diff.get("removed") and not diff.get("changed"):
+                    reply_lines.append("- Nothing needed to change for that request; the file is the same as before.")
+                elif kept:
+                    reply_lines.append(f"- Everything else is exactly as in v{ea['old_version']} (same design and pictures).")
+                reply_lines.append(f"- [Download v{ea['version']}]({ea['download_url']})\n")
 
             state["reply"] = "\n".join(reply_lines)
         except Exception as reply_exc:
@@ -1765,6 +1853,58 @@ def node_convert(state: GraphState) -> GraphState:
                 pass
 
 
+_ICON = {"pptx": "📊", "docx": "📄", "xlsx": "📈"}
+_NOUN = {"pptx": "presentation", "docx": "document", "xlsx": "workbook"}
+
+
+def _headline_for(created: list[dict[str, Any]]) -> str:
+    nouns = [_NOUN.get(a["kind"], a["kind"]) for a in created]
+    if not nouns:
+        return "Nothing was created."
+    what = nouns[0] if len(nouns) == 1 else ", ".join(nouns[:-1]) + " and " + nouns[-1]
+    return f"Here {'is' if len(nouns) == 1 else 'are'} your {what} on **{created[0]['title']}**."
+
+
+def _size_label(state: GraphState, kind: str) -> str:
+    plan = (state.get("content_plans") or {}).get(kind) or {}
+    if kind == "pptx" and state.get("deck_model"):
+        return f"{len(state['deck_model'].get('slides', []))} slides"
+    if kind == "docx" and plan:
+        return f"{len(plan.get('sections', []))} sections, about {(plan.get('length') or {}).get('value', '?')} words"
+    if kind == "xlsx" and state.get("workbook_model"):
+        return f"{len(state['workbook_model'].get('sheets', []))} sheets"
+    return ""
+
+
+def _template_label(state: GraphState, path: Any, kind: str) -> str:
+    """Which design the file uses, in words: the user's template, the default one, or the generated design."""
+    if kind == "pptx" and _no_template(state):
+        return "clean generated design"
+    if not path:
+        return ""
+    name = Path(str(path)).stem.replace("_", " ")
+    mode = str((state.get("plan") or {}).get("template_mode", "")).upper()
+    return f"your template “{name}”" if mode.endswith("UPLOADED") else f"default template “{name}”"
+
+
+def _unit_label(node_id: str) -> str:
+    m = re.match(r"(slide|section|sheet)_0*(\d+)", node_id or "")
+    return f"{m.group(1)} {m.group(2)}" if m else node_id
+
+
+def _next_steps(created: list[dict[str, Any]]) -> str:
+    kinds = {a["kind"] for a in created}
+    tips = []
+    if "pptx" in kinds:
+        tips += ["“make slide 3 shorter”", "“add a slide on costs after slide 4”"]
+    if "docx" in kinds:
+        tips += ["“expand the conclusion”"]
+    other = [n for k, n in (("docx", "a report"), ("pptx", "a presentation")) if k not in kinds]
+    if other:
+        tips.append(f"“create {other[0]} on the same topic”")
+    return "*You can ask for changes in plain words, e.g. " + ", ".join(tips[:3]) + ". Only that part changes.*"
+
+
 def route_intent(state: GraphState) -> str:
     """Route plan action to appropriate entry node."""
     plan_data = state.get("plan", {})
@@ -1791,6 +1931,10 @@ def should_retry(state: GraphState) -> str:
     passed = val_data.get("passed", True)
     retry_count = state.get("retry_count", 0)
 
+    elapsed = time.monotonic() - (state.get("started_at") or time.monotonic())
+    if not passed and retry_count < 1 and elapsed > RETRY_TIME_LIMIT_S:
+        logger.info("Validation found issues but %.0f s are spent; delivering with the issues reported", elapsed)
+        return "finalize_node"
     if not passed and retry_count < 1:
         state["retry_count"] = retry_count + 1
         logger.info("Validation failed. Retrying generation once with issue feedback...")

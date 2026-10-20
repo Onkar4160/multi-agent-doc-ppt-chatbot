@@ -77,8 +77,10 @@ ACTIVE REPORT / PRESENTATION TOPIC:
 {active_topic}
 
 CURRENT ARTIFACT TYPE: {artifact_type}
-CURRENT OUTLINE / CONTENT SUMMARY:
+CURRENT CONTENT (every unit with its node_id; points are numbered as the ops expect):
 {outline_summary}
+
+UNITS THE USER NAMED (resolved): {targets}
 
 TEMPLATE OUTLINE / LAYOUT ROLES:
 {layout_roles}
@@ -91,7 +93,16 @@ TONE PROFILE:
 
 RULES:
 1. Return a valid EditPlan object containing the target, list of ops to perform, and a clear summary.
-2. Change ONLY what the user asked for. Keep everything else identical.
+2. Change ONLY what the user asked for. Everything else in the file is kept exactly as it is in the current version,
+   so use the SMALLEST operation that does the job:
+   - one point on a slide: update_point / add_point / delete_point (slide_index and point_index from the content above);
+   - a slide's title, subtitle or notes: update_slide_text;
+   - a word, phrase or figure: replace_text with the exact text as shown above and the node_id of its slide/section;
+   - one paragraph of a document: update_paragraph; a whole section or slide only when the user asks to rewrite it
+     (update_section / update_slide — then copy every part that should not change verbatim).
+   Find the unit the user means by its content when they describe it ("the slide about costs", "the point on risks").
+3. scope_node_ids: list the node_id of every slide/section your ops change. Units not listed are restored from the
+   current version, so list exactly what you change.
 3. Keep the same tone throughout.
 4. GROUNDING & FACT CITATION:
    You may only state a specific fact (number, date, statistic, name, claimed event) if it matches an entry in the EVIDENCE PACK below, citing that entry's exact id as source_id. General connective text needs no citation but must contain no invented specific fact. If something isn't covered by the evidence pack, omit it or state it as general knowledge without invented precision — never fabricate a number or date.
@@ -116,8 +127,11 @@ def _generate_edit_plan(
     evidence_pack: list[Any] | None = None,
     active_topic: str = "",
     extra_error_context: str = "",
+    targets: list[str] | None = None,
 ) -> EditPlan:
     """ONE LLM call to parse user instruction into an EditPlan of operations."""
+    from app.agents.edit_content import outline_for_editor
+
     if isinstance(model, DocumentModel):
         outline_lines = [
             f"- Heading: '{s.heading}' ({len(s.blocks)} blocks)" for s in model.sections
@@ -168,7 +182,8 @@ def _generate_edit_plan(
         instruction=instruction,
         active_topic=active_topic or "(None)",
         artifact_type=artifact_type,
-        outline_summary=outline_summary,
+        outline_summary=outline_for_editor(model, targets) or outline_summary,
+        targets=", ".join(targets or []) or "(none named: find them from the content)",
         layout_roles=layout_roles,
         tone_profile=tone_str,
         evidence_pack_formatted=formatted_pack,
@@ -430,6 +445,9 @@ def edit_artifact(
         raise ValueError(f"Version for artifact {artifact_id} not found.")
 
     old_model_json = ver_rec.model_json
+    from app.services.render_context import RenderContext, deck_photos_by_node, photos_for_deck
+
+    render_ctx = RenderContext.from_json(getattr(ver_rec, "render_json", None))
     ver_id = ver_rec.id
     ver_no = ver_rec.version_no
     old_file_path = ver_rec.file_path
@@ -466,8 +484,12 @@ def edit_artifact(
             def_docx = Path("data/sample_templates/proposal_Template.docx")
             if def_docx.exists():
                 tmpl_path = def_docx
+        if render_ctx is not None and render_ctx.template() is not None:
+            tmpl_path, profile = render_ctx.template(), None
         if tmpl_path and not profile:
-            profile = analyze_document(tmpl_path)
+            from app.services.template_cache import cached_profile
+
+            profile = cached_profile(tmpl_path, db_session)
         elif not profile:
             profile = TemplateProfile(colors={"primary": "#000000"})
     elif art_type == "xlsx":
@@ -500,8 +522,16 @@ def edit_artifact(
             def_pptx = Path("data/sample_templates/presentation_Template.pptx")
             if def_pptx.exists():
                 tmpl_path = def_pptx
+        if render_ctx is not None:  # the next version is drawn exactly like this one (same template or design)
+            tmpl_path = render_ctx.template()
+            profile = None
+            if tmpl_path is None and render_ctx.mode == "template" and render_ctx.template_path:
+                logger.warning("Template %s of artifact %s is gone; using the default", render_ctx.template_path, artifact_id)
+                tmpl_path = Path("data/sample_templates/presentation_Template.pptx")
         if tmpl_path and not profile:
-            profile = analyze_presentation(tmpl_path)
+            from app.services.template_cache import cached_profile
+
+            profile = cached_profile(tmpl_path, db_session)
         elif not profile:
             profile = TemplateProfile(colors={"primary": "#000000"})
 
@@ -690,6 +720,9 @@ def edit_artifact(
     from app.models.style import StyleOverrides
     from app.services.edit_guard import is_pure_restyle, regression
 
+    from app.agents.edit_content import apply_precise_ops, normalize_targets, op_units
+
+    named_targets = normalize_targets(old_model, target_nodes)
     style_changes = parse_style_changes(instruction)
     restyle: StyleOverrides | None = None
     if is_pure_restyle(instruction, style_changes):
@@ -706,15 +739,21 @@ def edit_artifact(
             evidence_pack=fresh_pack,
             active_topic=active_topic,
             extra_error_context=extra_prompt_err,
+            targets=named_targets,
         )
 
     # 3. Apply Ops
-    if art_type == "docx":
-        new_model = _apply_ops_to_docx(old_model, edit_plan.ops)
-    elif art_type == "xlsx":
-        new_model = _apply_ops_to_xlsx(old_model, edit_plan.ops)
-    else:
-        new_model = _apply_ops_to_pptx(old_model, edit_plan.ops)
+    def _apply(plan: EditPlan) -> Any:
+        if art_type == "docx":
+            out = _apply_ops_to_docx(old_model, plan.ops)
+        elif art_type == "xlsx":
+            out = _apply_ops_to_xlsx(old_model, plan.ops)
+        else:
+            out = _apply_ops_to_pptx(old_model, plan.ops)
+        apply_precise_ops(out, plan.ops)
+        return out
+
+    new_model = _apply(edit_plan)
 
     if restyle is not None:
         new_model.style = restyle
@@ -739,13 +778,9 @@ def edit_artifact(
                 evidence_pack=fresh_pack,
                 active_topic=active_topic,
                 extra_error_context=retry_err,
+                targets=named_targets,
             )
-            if art_type == "docx":
-                new_model = _apply_ops_to_docx(old_model, edit_plan.ops)
-            elif art_type == "xlsx":
-                new_model = _apply_ops_to_xlsx(old_model, edit_plan.ops)
-            else:
-                new_model = _apply_ops_to_pptx(old_model, edit_plan.ops)
+            new_model = _apply(edit_plan)
         except Exception as retry_exc:
             logger.warning(f"EditPlan retry call failed: {retry_exc}")
 
@@ -824,18 +859,9 @@ def edit_artifact(
             except Exception as exc:
                 logger.warning(f"Refresh with web LLM call failed: {exc}")
 
-    # 6. Date enforcement in code (format: Month YYYY)
+    # 6. No re-stamping of dates: an edit leaves the cover and the document date as they were (FR-EDIT-3)
     import datetime
     today_str = datetime.date.today().strftime("%B %Y")
-    if isinstance(new_model, DocumentModel):
-        new_model.date = today_str
-    elif isinstance(new_model, DeckModel) and new_model.slides:
-        if new_model.slides[0].role == "title":
-            t_slide = new_model.slides[0]
-            if not t_slide.subtitle:
-                t_slide.subtitle = today_str
-            elif today_str not in t_slide.subtitle:
-                t_slide.subtitle = f"{t_slide.subtitle} | {today_str}"
 
     # 7. Merge Sources Map & Standardize
     merged_sources_map = dict(old_sources_map)
@@ -862,15 +888,19 @@ def edit_artifact(
     ensure_node_ids(new_model)
     from app.services.edit_guard import restore_out_of_scope
 
-    restored = restore_out_of_scope(old_model, new_model, target_nodes if restyle is None else None)
+    whole = any(getattr(op, "type", "") in ("condense_deck", "refresh_with_web") for op in edit_plan.ops)
+    scope = named_targets or list(dict.fromkeys(
+        op_units(old_model, edit_plan.ops) + normalize_targets(old_model, edit_plan.scope_node_ids)))
+    restored = restore_out_of_scope(old_model, new_model, scope if (restyle is None and not whole) else None)
     if restored:
         logger.info("Edit touched units outside its scope; restored %s from version %s", restored, ver_no)
     diff = diff_models(old_model, new_model)
     actually_changed_nodes = diff.get("changed", []) + diff.get("added", []) + diff.get("removed", [])
 
     # 9. Render & Validate
-    output_dir = Path("data/outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    from app.services.render_context import output_dir as _out
+
+    output_dir = _out()
     next_ver_no = ver_no + 1
 
     if art_type == "docx":
@@ -894,7 +924,17 @@ def edit_artifact(
         )
     else:
         out_file = output_dir / f"Deck_{artifact_id}_v{next_ver_no}.pptx"
-        render_pptx(new_model, tmpl_path, profile, out_file, sources_map=standard_sources_map)
+        deck_photos = photos_for_deck(new_model, render_ctx)
+        old_ids = {s.node_id for s in old_model.slides}
+        if render_ctx is not None and any(s.node_id not in old_ids for s in new_model.slides):
+            from app.services.images import fetch_deck_photos
+
+            fetched = fetch_deck_photos(new_model, tmpl_path, profile, out_file.parent / "media",
+                                        subject=active_topic, existing=deck_photos)
+            # Slides kept from the previous version keep exactly the pictures they had; only new slides get one.
+            deck_photos.update({i: p for i, p in fetched.items() if new_model.slides[i].node_id not in old_ids})
+        render_pptx(new_model, tmpl_path, profile, out_file, sources_map=standard_sources_map, photos=deck_photos,
+                    design_hint=render_ctx.design_hint if render_ctx else "")
         val_rep = validate_outputs(
             deck_model=new_model,
             expected_slide_count=len(new_model.slides),
@@ -909,7 +949,7 @@ def edit_artifact(
         logger.warning(f"Scope validation failed: {scope_errors[0].message}")
 
     # Regression guard: units outside the scope stay identical in the model and in the file (FR-EDIT-3)
-    guard = regression(old_model, new_model, target_nodes if restyle is None else [], old_file=old_file_path,
+    guard = regression(old_model, new_model, scope if restyle is None else [], old_file=old_file_path,
                        new_file=out_file, kind=art_type)
     if restyle is not None and guard.changed_units:
         logger.warning("Restyle changed content units %s", guard.changed_units)
@@ -933,6 +973,15 @@ def edit_artifact(
         parent_version_id=ver_id,
         diff_json=diff,
     )
+    if art_type == "pptx":
+        new_ver_rec.render_json = RenderContext(
+            template_path=str(tmpl_path) if tmpl_path else None,
+            template_file_id=render_ctx.template_file_id if render_ctx else None,
+            mode="template" if tmpl_path else "generated",
+            design_hint=render_ctx.design_hint if render_ctx else "",
+            photos=deck_photos_by_node(new_model, deck_photos, artifact_id)).to_json()
+    elif render_ctx is not None:
+        new_ver_rec.render_json = render_ctx.to_json()
     db_session.commit()
 
     llm_calls_used = llm.stats.total_calls - initial_llm_calls

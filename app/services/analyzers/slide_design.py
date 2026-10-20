@@ -247,6 +247,11 @@ def analyse_slide(index: int, slide, slide_w: int, slide_h: int) -> SlideBase | 
             framed = fill and _light(fill) and 0.04 <= share <= 0.3 and 0.5 <= b.w / max(b.h, 1) <= 2.2
             if framed and b.intersection_area(region) <= 0.2 * b.area():
                 frames.append(i)
+    sample_photos = [
+        i for i, s in enumerate(shapes)
+        if i not in remove and i not in text_slots and i not in photos and _box(s) is not None
+        and _box(s).area() >= 0.025 * full and is_sample_photo(s, slide)
+    ]
     area = region.area() / full if region else 0.0
     region_color = None
     if region is not None:
@@ -258,10 +263,12 @@ def analyse_slide(index: int, slide, slide_w: int, slide_h: int) -> SlideBase | 
     # Bases with many small sample items are diagrams; prefer simple ones.
     score = area - 0.04 * max(0, len(body) - 3) - (0.1 if len(photos) > 1 else 0)
     # Artwork beside a short sample title covers our longer headline once the title box is widened.
+    title_blocked = False
     if title_box is not None and kind == "content":
         wide = Box(x=title_box.x, y=title_box.y, w=max(title_box.w, region.w if region else 0), h=title_box.h)
         if any(b.intersection_area(wide) > 0.1 * wide.area() for b in blockers):
             score -= 0.2
+            title_blocked = True
     return SlideBase(
         index=index,
         kind=kind,
@@ -270,11 +277,52 @@ def analyse_slide(index: int, slide, slide_w: int, slide_h: int) -> SlideBase | 
         remove_shapes=sorted(set(remove)),
         photo_shapes=photos,
         frame_shapes=frames,
+        sample_photos=sample_photos,
+        title_blocked=title_blocked,
         region=region,
         score=round(score, 3),
         title_text=title_text[:60],
         region_color=region_color,
     )
+
+
+def photo_blips(shape) -> list:
+    """``a:blip`` elements of every picture or picture-filled shape inside ``shape`` (groups at any depth)."""
+    el = shape._element if hasattr(shape, "_element") else shape
+    return list(el.iter(f"{_A}blip"))
+
+
+def _photographic(blob: bytes) -> bool:
+    """Opaque with many distinct colours: a photograph (not a logo, icon or transparent watercolour leaf)."""
+    from PIL import Image
+
+    try:
+        img = Image.open(io.BytesIO(blob)).convert("RGBA")
+    except Exception:  # noqa: BLE001 - unreadable media is not a photo slot
+        return False
+    img.thumbnail((48, 48))
+    px = list(pixels_of(img))
+    if not px:
+        return False
+    opaque = [p for p in px if p[3] > 240]
+    if len(opaque) < 0.95 * len(px):
+        return False
+    colours = {(r // 16, g // 16, b // 16) for r, g, b, _a in opaque}
+    return len(colours) >= 60
+
+
+def is_sample_photo(shape, slide) -> bool:
+    """A picture (or group holding one) whose image is a photograph: the template's stand-in for a topic photo."""
+    for blip in photo_blips(shape):
+        rid = blip.get(_R_EMBED)
+        if not rid:
+            continue
+        try:
+            if _photographic(slide.part.related_part(rid).blob):
+                return True
+        except KeyError:
+            continue
+    return False
 
 
 def _own_fill(shape) -> str | None:
@@ -385,6 +433,17 @@ def slide_style(
         if len(accents) >= 4:
             break
     text_color = title_colors.most_common(1)[0][0] if title_colors else theme_colors.get("dk1")
+    if not accents:
+        # A monochrome design (greys, black and white): its accents are the dark neutrals it fills shapes with,
+        # not the theme's default accent colour, which the slides never show.
+        for hexed, _count in fills.most_common(30):
+            _h, lum, _s = colorsys.rgb_to_hls(*(int(hexed[i : i + 2], 16) / 255 for i in (0, 2, 4)))
+            if 0.08 < lum < 0.6 and all(_distance(hexed, a) > 40 for a in accents):
+                accents.append(hexed)
+            if len(accents) >= 3:
+                break
+        if not accents and text_color:
+            accents.append(text_color)
     return fonts, accents, text_color, background
 
 

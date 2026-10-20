@@ -47,7 +47,7 @@ def html_to_text(html: str) -> str:
     return "\n".join(out)[:40000]
 
 
-def fetch_text(url: str, *, client: httpx.Client | None = None, timeout: float = 10.0) -> str | None:
+def fetch_text(url: str, *, client: httpx.Client | None = None, timeout: float = 6.0) -> str | None:
     """Readable text of a page, or None when it cannot be fetched safely."""
     if not re.match(r"^https?://", url or "", re.I):
         return None

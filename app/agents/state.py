@@ -9,6 +9,7 @@ class GraphState(TypedDict, total=False):
     """Shared state container passed between LangGraph nodes."""
 
     run_id: str
+    started_at: float  # time.monotonic() when the run began (time budget for optional rounds)
     session_id: str | None
     user_message: str
     file_ids: list[int]
@@ -34,6 +35,7 @@ class GraphState(TypedDict, total=False):
     kind_hint: str | None  # "retry" | "clarification_answer" decided by the chat API before the graph runs
     pending_clarification: str | None  # the request the user is answering
     raw_message: str  # the user's own words (user_message may be a merged or retried request)
+    subject: str  # what the deliverable is about, resolved from the whole conversation (conversation_memory)
     interpretation: dict[str, Any] | None  # Interpretation (app/models/interpretation.py)
     task_id: int | None
     dossier: dict[str, Any] | None  # research summary: sources, coverage, conflicts, gaps (Stage 5)

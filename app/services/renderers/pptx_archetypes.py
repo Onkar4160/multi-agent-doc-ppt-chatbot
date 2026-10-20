@@ -119,12 +119,14 @@ def draw_blocks(canvas: Canvas, region: Rect, blocks: list[Any], palette: Palett
 
 
 def _side_text(c: Canvas, r: Rect, blocks: list[Any], p: Palette) -> None:
+    from app.services.copyfit import strip_citations
+
     paras = []
     for b in blocks:
         if b.type == "callout":
             paras.append(BulletPara(_para(b.text + _cite(b), 16, p, bold=True), color=p.accent))
         else:
-            paras += [BulletPara(_para(i.text + _cite(i), 15, p), level=0) for i in b.items]
+            paras += [BulletPara(_para(strip_citations(i.text) + _cite(i), 15, p), level=0) for i in b.items]
     c.text(r, paras, TextStyle(p.text, anchor="middle", bullet_color=p.accent), name="content:note", min_pt=MIN_PT)
 
 
@@ -142,19 +144,19 @@ def _chart(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
     if b.title:
         chart.chart_title.text_frame.text = b.title + unit
         tp = chart.chart_title.text_frame.paragraphs[0]
-        tp.runs[0].font.size, tp.runs[0].font.bold = Pt(14), True
+        tp.runs[0].font.size, tp.runs[0].font.bold = Pt(round(16 * _SCALE[0])), True
         tp.runs[0].font.color.rgb = rgb(p.text)
     pie = kind in (XL_CHART_TYPE.PIE, XL_CHART_TYPE.DOUGHNUT)
     chart.has_legend = pie or len(b.series) > 1
     if chart.has_legend:
         chart.legend.position = XL_LEGEND_POSITION.BOTTOM
         chart.legend.include_in_layout = False
-        chart.legend.font.size = Pt(12)
+        chart.legend.font.size = Pt(round(14 * _SCALE[0]))
         chart.legend.font.color.rgb = rgb(p.text)
     plot = chart.plots[0]
     plot.has_data_labels = True
     labels = plot.data_labels
-    labels.font.size = Pt(12)
+    labels.font.size = Pt(round(14 * _SCALE[0]))
     labels.font.color.rgb = rgb(p.text)
     labels.number_format = '0%' if pie else 'General'
     labels.number_format_is_linked = not pie
@@ -175,7 +177,7 @@ def _chart(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
                 fmt.fill.solid()
                 fmt.fill.fore_color.rgb = rgb(colors[i % len(colors)])
         for axis in (chart.category_axis, chart.value_axis):
-            axis.tick_labels.font.size = Pt(12)
+            axis.tick_labels.font.size = Pt(round(14 * _SCALE[0]))
             axis.tick_labels.font.color.rgb = rgb(p.text)
             axis.format.line.color.rgb = rgb(p.muted)
         chart.value_axis.has_major_gridlines = True
@@ -220,7 +222,23 @@ def _table(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
 
 
 def _kpi(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
+    from app.services.copyfit import strip_citations
+
     items = b.items[:4]
+    if len(items) == 1:
+        _kpi_hero(c, r, items[0], p)
+        return
+    s = _SCALE[0]
+    if r.w / len(items) < 2.4 * s:  # too narrow for tiles side by side: one row per figure
+        for i, (item, row) in enumerate(zip(items, r.split_v(len(items), 0.15 * s))):
+            c.rect(row, p.surface, f"decor:kpi-{i + 1}", rounded=True)
+            value, label = row.inset(0.15 * s, 0.05 * s).take_left(row.w * 0.4, 0.15 * s)
+            c.text(value, [BulletPara(_para(item.value, 30, p, bold=True, heading=True))],
+                   TextStyle(p.accent, align="right", anchor="middle"), name=f"content:kpi-value-{i + 1}", min_pt=16)
+            text = strip_citations(item.label) + (f" ({item.delta})" if item.delta else "") + _cite(item)
+            c.text(label, [BulletPara(_para(text, 15, p))], TextStyle(p.text, anchor="middle"),
+                   name=f"content:kpi-label-{i + 1}", min_pt=MIN_PT * 0.8)
+        return
     tiles = r.split_h(len(items), 0.3) if len(items) > 1 else [r.inset(r.w * 0.25, 0)]
     for i, (item, t) in enumerate(zip(items, tiles)):
         tile = Rect(t.x, r.y + r.h * 0.15, t.w, r.h * 0.7)
@@ -230,14 +248,44 @@ def _kpi(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
         value, label = inner.take_top(inner.h * 0.5)
         c.text(value, [BulletPara(_para(item.value, 40, p, bold=True, heading=True))],
                TextStyle(p.accent, align="center", anchor="bottom"), name=f"content:kpi-value-{i + 1}", min_pt=20)
-        text = item.label + (f" ({item.delta})" if item.delta else "") + _cite(item)
+        text = strip_citations(item.label) + (f" ({item.delta})" if item.delta else "") + _cite(item)
         c.text(label, [BulletPara(_para(text, 15, p))], TextStyle(p.text, align="center"),
                name=f"content:kpi-label-{i + 1}", min_pt=MIN_PT)
+
+
+def _kpi_hero(c: Canvas, r: Rect, item: Any, p: Palette) -> None:
+    """One headline figure: the number large in the accent colour, an accent rule, its meaning beside it."""
+    from app.services.copyfit import strip_citations
+
+    s = _SCALE[0]
+    if r.w < 6.0 * s:  # a narrow content column: the figure above its meaning
+        h = min(r.h, 3.4 * s)
+        band = Rect(r.x, r.y + (r.h - h) / 2, r.w, h)
+        top, below = band.take_top(band.h * 0.5, 0.15 * s)
+        c.text(top, [BulletPara(_para(item.value, 60, p, bold=True, heading=True))],
+               TextStyle(p.accent, align="center", anchor="bottom"), name="content:kpi-value-1", min_pt=28)
+        c.rect(Rect(band.x + band.w * 0.4, below.y - 0.1 * s, band.w * 0.2, 0.05 * s), p.accent, "decor:kpi-rule")
+        text = strip_citations(item.label) + (f" ({item.delta})" if item.delta else "") + _cite(item)
+        c.text(Rect(below.x, below.y + 0.1 * s, below.w, below.h - 0.1 * s), [BulletPara(_para(text, 20, p))],
+               TextStyle(p.text, align="center"), name="content:kpi-label-1", min_pt=MIN_PT)
+        return
+    h = min(r.h, 3.2 * s)
+    band = Rect(r.x, r.y + (r.h - h) / 2, r.w, h)
+    left, right = band.take_left(band.w * 0.45, 0.5 * s)
+    c.text(left, [BulletPara(_para(item.value, 66, p, bold=True, heading=True))],
+           TextStyle(p.accent, align="right", anchor="middle"), name="content:kpi-value-1", min_pt=28)
+    c.rect(Rect(right.x - 0.3 * s, band.y + band.h * 0.2, 0.06 * s, band.h * 0.6), p.accent, "decor:kpi-rule")
+    text = strip_citations(item.label) + (f" ({item.delta})" if item.delta else "") + _cite(item)
+    c.text(Rect(right.x, band.y, right.w, band.h), [BulletPara(_para(text, 22, p))],
+           TextStyle(p.text, anchor="middle"), name="content:kpi-label-1", min_pt=MIN_PT)
 
 
 def _timeline(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
     events = b.events[:7]
     n = max(len(events), 1)
+    if r.w / n < 1.7 * _SCALE[0]:  # too narrow for a horizontal axis: a vertical timeline (date, then event)
+        _timeline_vertical(c, r, events, p)
+        return
     y = r.y + r.h * 0.45
     c.line(r.x, y, r.right_x, y, p.muted, "decor:timeline-axis", width_pt=2.5)
     slot = r.w / n
@@ -256,6 +304,16 @@ def _timeline(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
 def _process(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
     steps = b.steps[:6]
     n = max(len(steps), 1)
+    s_ = _SCALE[0]
+    if r.w / n < 2.0 * s_:  # too narrow for chevrons in a row: numbered steps from top to bottom
+        for i, (st, row) in enumerate(zip(steps, r.split_v(n, 0.12 * s_))):
+            d = min(row.h * 0.8, 0.6 * s_)
+            c.badge(row.x + d / 2, row.y + row.h / 2, d, str(i + 1), p.accent if i % 2 == 0 else p.accent2, p.on_accent,
+                    p.heading_font or "Calibri", f"decor:step-{i + 1}")
+            text = st.label + (f": {st.detail}" if st.detail else "")
+            c.text(Rect(row.x + d + 0.2 * s_, row.y, row.w - d - 0.2 * s_, row.h), [BulletPara(_para(text, 15, p))],
+                   TextStyle(p.text, anchor="middle"), name=f"content:step-label-{i + 1}", min_pt=MIN_PT * 0.8)
+        return
     gap = 0.15
     cells = r.split_h(n, gap)
     for i, (s, cell) in enumerate(zip(steps, cells)):
@@ -270,8 +328,33 @@ def _process(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
             c.text(body, [BulletPara(_para(s.detail, 14, p))], TextStyle(p.text), name=f"content:step-detail-{i + 1}", min_pt=MIN_PT)
 
 
+def _timeline_vertical(c: Canvas, r: Rect, events: list[Any], p: Palette) -> None:
+    s = _SCALE[0]
+    rows = r.split_v(max(len(events), 1), 0.12 * s)
+    x_line = r.x + r.w * 0.3
+    c.line(x_line, rows[0].y + 0.1 * s, x_line, rows[-1].bottom_y - 0.1 * s, p.muted, "decor:timeline-axis", width_pt=2)
+    for i, (e, row) in enumerate(zip(events, rows)):
+        c.circle(x_line, row.y + row.h / 2, 0.22 * s, p.accent, f"decor:timeline-dot-{i + 1}")
+        c.text(Rect(row.x, row.y, r.w * 0.3 - 0.3 * s, row.h), [BulletPara(_para(e.date, 18, p, bold=True, heading=True))],
+               TextStyle(p.accent, align="right", anchor="middle"), name=f"content:timeline-date-{i + 1}", min_pt=MIN_PT)
+        text = e.label + (f": {e.detail}" if e.detail else "")
+        c.text(Rect(x_line + 0.3 * s, row.y, r.right_x - x_line - 0.3 * s, row.h), [BulletPara(_para(text, 16, p))],
+               TextStyle(p.text, anchor="middle"), name=f"content:timeline-label-{i + 1}", min_pt=MIN_PT)
+
+
 def _comparison(c: Canvas, r: Rect, b: Any, p: Palette) -> None:
     cols = b.columns[:3]
+    if r.w / max(len(cols), 1) < 2.6 * _SCALE[0]:  # narrow area: options stacked as rows instead of columns
+        r_rows = r.split_v(len(cols), 0.2 * _SCALE[0])
+        for i, (col, row) in enumerate(zip(cols, r_rows)):
+            c.rect(row, p.surface, f"decor:column-{i + 1}", rounded=True)
+            head, body = row.take_top(min(0.5 * _SCALE[0], row.h * 0.35))
+            c.rect(head, p.accent if i == 0 else p.accent2, f"decor:column-head-{i + 1}", rounded=True)
+            c.text(head.inset(0.15, 0.03), [BulletPara(_para(col.heading, 16, p, bold=True, heading=True))],
+                   TextStyle(p.on_accent, anchor="middle"), name=f"content:column-head-{i + 1}", min_pt=MIN_PT * 0.8)
+            c.text(body.inset(0.15, 0.08), [BulletPara(_para(pt, 14, p), level=0) for pt in col.points],
+                   TextStyle(p.text, anchor="middle", bullet_color=p.accent), name=f"content:column-{i + 1}", min_pt=MIN_PT)
+        return
     cells = r.split_h(len(cols), 0.3)
     need = max(content_height([BulletPara(_para(pt, 15, p), level=0) for pt in col.points], cell.w - 0.4)
                for col, cell in zip(cols, cells)) + 0.7 + 0.5

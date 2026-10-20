@@ -20,6 +20,7 @@ from app.models.template_profile import Box, SlideBase, SlideDesign
 from app.services.layout.backdrop import color_under, is_dark
 from app.services.layout.colors import SlideTokens, contrast_ratio, relative_luminance, tokens_from_template
 from app.services.renderers.pptx_archetypes import Palette, draw_blocks, has_visual
+from app.services.renderers.pptx_media import _slot_frame, clear_of_artwork, round_corners, split_for_photo, swap_photo
 from app.services.layout.text import EMU_PER_INCH, Para
 from app.services.renderers.pptx_canvas import (
     BulletPara,
@@ -78,6 +79,7 @@ def assign_bases(kinds: list[str], design: SlideDesign) -> list[SlideBase]:
     contents = sorted((b for b in bases if b.kind == "content"), key=lambda b: -b.score)
     light = [b for b in contents if not is_dark(b.region_color)]
     contents = light or contents  # our body text is dark; dark panels are used only if nothing else exists
+    contents = [b for b in contents if not b.title_blocked] or contents  # headlines must not run into artwork
     sw = design.slide_width
 
     def roomy(b: SlideBase, area: float, width: float) -> bool:
@@ -183,17 +185,25 @@ class CloneContext:
             kept.append(i)
         by_index = dict(zip(kept, list(slide.shapes), strict=True))
         title_shape = by_index.get(base.title_shape) if base.title_shape is not None else None
-        if title_shape is not None:
+        if title_shape is not None and base.kind == "content":
+            # Cover, section and closing titles keep the designer's box: widening them would cross the colour
+            # panels those slides are built from. Content headlines need the room of the content area.
             self._widen_title(title_shape, base)
+        elif title_shape is not None:  # the body area of a structural slide starts below its real title
+            self._title_geometry[base.index] = (int(title_shape.left), int(title_shape.top),
+                                                int(title_shape.width), int(title_shape.height))
         slots = {
             "title": title_shape,
             "subtitle": by_index.get(base.subtitle_shape) if base.subtitle_shape is not None else None,
             "photos": [by_index[i] for i in base.photo_shapes if i in by_index],
             "frames": [by_index[i] for i in base.frame_shapes if i in by_index],
+            "samples": [by_index[i] for i in getattr(base, "sample_photos", []) if i in by_index],
             "sample_title": base.title_text,
         }
-        if slots["subtitle"] is not None and title_shape is not None:
-            self._widen_like(slots["subtitle"], title_shape)
+        if slots["subtitle"] is not None:
+            slots["subtitle_frame"] = _slot_frame(slide, slots["subtitle"], self.design)
+            if title_shape is not None and slots["subtitle_frame"] is None:
+                self._widen_like(slots["subtitle"], title_shape)
         return slide, self._frame(base), slots
 
     def _widen_title(self, shape, base: SlideBase) -> None:
@@ -271,10 +281,10 @@ class CloneContext:
 
 
 def _bullet_text(item: BulletItem) -> str:
+    from app.services.copyfit import smart_trim, strip_citations
     from app.services.pptx_renderer import strip_markdown
 
-    words = strip_markdown(item.text).split()
-    text = " ".join(words[:MAX_BULLET_WORDS]) + ("..." if len(words) > MAX_BULLET_WORDS else "")
+    text = smart_trim(strip_citations(strip_markdown(item.text)), MAX_BULLET_WORDS)
     if item.source_ids:
         text += " " + "".join(f"[{sid}]" for sid in sorted(set(item.source_ids)))
     return text
@@ -310,15 +320,18 @@ class CloneComposer:
         for slide_model, kind, photo in zip(slides, kinds, photos, strict=True):
             slide, self.f, self.slots = self.tpl.add_slide(prs, kind)
             canvas = Canvas(slide, log, scale=self.f.scale)
+            slotted = any(self.slots.get(k) for k in ("photos", "samples", "frames"))
+            side = photo if (photo is not None and not slotted and kind not in _STRUCTURAL
+                             and not has_visual(slide_model.blocks)) else None
             if kind in _STRUCTURAL:
                 self._structural(canvas, slide_model, deck, kind)
             elif has_visual(slide_model.blocks):
                 self._visual(canvas, slide_model)
-            elif kind == "two":
+            elif kind == "two" and side is None:
                 self._two_content(canvas, slide_model)
             else:
-                self._bullets(canvas, slide_model)
-            filled = photo is not None and self._fill_photo(canvas, photo)
+                side = side if self._bullets(canvas, slide_model, side_photo=side) else None
+            filled = side is not None or (photo is not None and slotted and self._fill_photo(canvas, photo))
             self.tpl.finish_slide(slide, self.slots)
             notes = strip_markdown(slide_model.notes or "")
             if filled:
@@ -344,8 +357,9 @@ class CloneComposer:
         )
 
     def _bullet_paras(self, lines: list[tuple[str, int | None]], *, base: float | None = None) -> list[BulletPara]:
-        # Sparse slides get larger type; the fitter only ever shrinks from here.
-        size = base or (24 if len(lines) <= 3 else 20 if len(lines) <= 5 else 18)
+        # One body size for the whole deck (slides that differ only in point count must not change type size);
+        # the fitter shrinks a slide only when its text would not fit.
+        size = base or (20 if len(lines) <= 5 else 18)
         return [BulletPara(self._p(text, size if not level else size - 2, after=12), level=level) for text, level in lines]
 
     def _body_style(self, **kw) -> TextStyle:
@@ -365,6 +379,7 @@ class CloneComposer:
         title_ph = self.slots.get("title")
         size = {"cover": 44, "section": 36, "closing": 36}[kind]
         if title_ph is not None:
+            self._readable_span(c, title_ph)
             c.placeholder_text(
                 title_ph, [BulletPara(self._p(title, size, heading=True))], name="content:title", min_pt=MIN_TITLE
             )
@@ -376,6 +391,8 @@ class CloneComposer:
         if not second:
             return
         body_ph = self.slots.get("subtitle")
+        if body_ph is not None:
+            self._readable_span(c, body_ph)
         paras = [BulletPara(self._p(t, 20 if kind == "cover" else 18), level=lvl) for t, lvl in second]
         if body_ph is None:
             c.text(self.f.body, paras, self._body_style(), name="content:body", min_pt=MIN_BODY)
@@ -385,14 +402,16 @@ class CloneComposer:
         room = self.f.h - (int(body_ph.top) + int(body_ph.height)) / EMU_PER_INCH - 0.85 * self.f.scale
         if room < 0.45 * self.f.scale * max(len(paras) - 1, 1):
             c.placeholder_text(body_ph, paras, name="content:subtitle", min_pt=MIN_BODY)
+            self._fit_frame(body_ph, self.slots.get("subtitle_frame"), title_ph)
             self._readable(c, body_ph)
             if title_ph is not None:
-                c.separate(title_ph, body_ph)
+                c.separate(title_ph, body_ph, self.slots.get("subtitle_frame"))
             return
         c.placeholder_text(body_ph, paras[:1], name="content:subtitle", min_pt=MIN_BODY)
+        self._fit_frame(body_ph, self.slots.get("subtitle_frame"), title_ph)
         self._readable(c, body_ph)
         if title_ph is not None:
-            c.separate(title_ph, body_ph)
+            c.separate(title_ph, body_ph, self.slots.get("subtitle_frame"))
         rest = paras[1:]
         if rest:
             top = (int(body_ph.top) + int(body_ph.height)) / EMU_PER_INCH + 0.25 * self.f.scale
@@ -440,7 +459,8 @@ class CloneComposer:
         """Render the subtitle as a lead line above the body; returns the remaining body area."""
         from app.services.pptx_renderer import strip_markdown
 
-        body = self.f.body
+        body = clear_of_artwork(c.slide, self.f.body, self.f.scale, self.tpl.design.slide_width * self.tpl.design.slide_height)
+        self.f = replace(self.f, body=body)
         text = strip_markdown(s.subtitle or "").strip()
         if not text:
             return body
@@ -448,16 +468,27 @@ class CloneComposer:
         c.text(lead, [BulletPara(self._p(text, 18))], TextStyle(self.t.text_muted), name="content:lead", min_pt=MIN_BODY)
         return rest
 
-    def _bullets(self, c: Canvas, s: SlideModel) -> None:
+    def _bullets(self, c: Canvas, s: SlideModel, side_photo: Any = None) -> bool:
+        """Headline, lead and points; True when side_photo was placed beside the text."""
         self._headline(c, self._title_text(s))
         body = self._lead(c, s)
-        lines = _lines(s.bullets)
+        lines = _lines(s.bullets or s.left + s.right)
+        if side_photo is not None and body.w >= 0.5 * self.f.w:  # a narrow panel keeps its text readable instead
+            text_r, photo_r = split_for_photo(body, self.f.scale)
+            c.picture(photo_r, side_photo.path, name="content:image", alt=side_photo.alt_text)
+            round_corners(c.slide.shapes[-1])
+            body = text_r
+        else:
+            side_photo = None
         if lines:
             c.text(body, self._bullet_paras(lines), self._body_style(), name="content:body", min_pt=MIN_BODY)
+        return side_photo is not None
 
     def _visual(self, c: Canvas, s: SlideModel) -> None:
         """Native chart, table, KPI, timeline, process, comparison or quote in the template's content region."""
         self._headline(c, self._title_text(s))
+        self.f = replace(self.f, body=clear_of_artwork(c.slide, self.f.body, self.f.scale,
+                                                       self.tpl.design.slide_width * self.tpl.design.slide_height))
         t = self.t
         palette = Palette(accent=t.primary, accent2=t.secondary, text=t.text, muted=t.text_muted, surface=t.surface,
                           background=t.background, on_accent="FFFFFF" if relative_luminance(t.primary) < 0.4 else "1F2933",
@@ -507,6 +538,9 @@ class CloneComposer:
         """Put the slide's photo into the template's picture frame; True when one was filled."""
         photos = self.slots.get("photos") or []
         frames = self.slots.get("frames") or []
+        samples = self.slots.get("samples") or []
+        if not photos and samples:
+            return swap_photo(c.slide, samples[0], photo)
         if not photos and not frames:
             return False
         frame = photos[0] if photos else frames[0]
@@ -528,17 +562,87 @@ class CloneComposer:
 
     # ---------------------------------------------------------------- template fidelity
 
+    def _readable_span(self, c: Canvas, shape) -> None:
+        """Narrow a text box to the stretch of it where its text colour is readable on what lies behind.
+
+        Designers let a one-word sample title straddle two panels (yellow | dark gradient); a real, longer title
+        set in that box would run from one into the other and half of it would disappear. The box keeps the
+        readable stretch around its alignment anchor (or the longest readable stretch).
+        """
+        if shape.left is None or shape.width is None:
+            return
+        runs = [r for p in shape.text_frame.paragraphs for r in p.runs]
+        try:
+            color = str(runs[0].font.color.rgb) if runs and runs[0].font.color.type is not None else self.t.text
+        except AttributeError:
+            color = self.t.text
+        x0, w = int(shape.left), int(shape.width)
+        y = int(shape.top) + int(shape.height) // 2
+        n = 40
+        ok = []
+        for i in range(n):
+            x = x0 + int(w * (i + 0.5) / n)
+            under = color_under(c.slide, (x, y, 1, 1), stop_at=shape._element) or "FFFFFF"
+            ok.append(contrast_ratio(color, under) >= 3)
+        if all(ok) or not any(ok):
+            return
+        algn = getattr(shape.text_frame.paragraphs[0].alignment, "name", "") or ""
+        anchor = {"CENTER": n // 2, "RIGHT": n - 1}.get(algn, 0)
+        runs_ok, start = [], None
+        for i, flag in enumerate(ok + [False]):
+            if flag and start is None:
+                start = i
+            elif not flag and start is not None:
+                runs_ok.append((start, i - 1))
+                start = None
+        span = next((r for r in runs_ok if r[0] <= anchor <= r[1]), max(runs_ok, key=lambda r: r[1] - r[0]))
+        if (span[1] - span[0] + 1) / n < 0.3:
+            return
+        pad = int(self.tpl.design.slide_width * 0.02)
+        left = x0 + int(w * span[0] / n) + (pad if span[0] > 0 else 0)
+        right = x0 + int(w * (span[1] + 1) / n) - (pad if span[1] < n - 1 else 0)
+        set_geometry(shape, x=left, w=max(right - left, int(w * 0.3)))
+
+    def _fit_frame(self, ph, frame, title) -> None:
+        """A decorative frame around a text slot (a pill behind a subtitle) is resized with its text: the text
+        gets the width it needs on one line (up to the title's width) and the frame keeps its padding around it."""
+        if frame is None:
+            return
+        from app.services.layout.text import measure
+
+        pad_l, pad_r = int(ph.left) - int(frame.left), int(frame.left) + int(frame.width) - (int(ph.left) + int(ph.width))
+        pad_t = int(ph.top) - int(frame.top)
+        pad_b = int(frame.top) + int(frame.height) - (int(ph.top) + int(ph.height))
+        tf = ph.text_frame
+        runs = [r for p in tf.paragraphs for r in p.runs]
+        if not runs:
+            return
+        size = runs[0].font.size.pt if runs[0].font.size else 18
+        para = Para(tf.text.replace("\n", " "), size, bold=bool(runs[0].font.bold), font=runs[0].font.name)
+        margins = int(tf.margin_left) + int(tf.margin_right)
+        limit = max(int(ph.width), int(title.width) if title is not None else int(self.tpl.design.slide_width * 0.8))
+        line = measure([para], 10**9).height_emu
+        width = int(ph.width)
+        while width < limit and measure([para], width - margins).height_emu > line * 1.2:
+            width = min(limit, width + int(EMU_PER_INCH * 0.25))
+        center = int(ph.left) + int(ph.width) // 2
+        left = max(int(self.tpl.design.slide_width * 0.03), center - width // 2)
+        set_geometry(ph, x=left, w=width)
+        set_geometry(frame, x=left - max(pad_l, 0), w=width + max(pad_l, 0) + max(pad_r, 0),
+                     y=int(ph.top) - max(pad_t, 0), h=int(ph.height) + max(pad_t, 0) + max(pad_b, 0))
+
     @staticmethod
     def _clear_title(c: Canvas, shape) -> None:
         """Template accent lines drawn under a one-word sample title must not strike through ours."""
         top, bottom = int(shape.top), int(shape.top) + int(shape.height)
         left, right = int(shape.left), int(shape.left) + int(shape.width)
-        thin = EMU_PER_INCH * 0.12  # accent rules are often grouped with end caps, so slightly thicker
+        # An accent rule is long and flat relative to the slide (often grouped with end caps, so not hairline thin).
+        thin = max(EMU_PER_INCH * 0.12, int(c.slide.part.package.presentation_part.presentation.slide_height) * 0.03)
         for other in c.slide.shapes:
             if other is shape or other.name.startswith(("content:", "footer:")) or other.width is None:
                 continue
             ox, oy, ow, oh = int(other.left), int(other.top), int(other.width), int(other.height)
-            horizontal = oh <= thin and ow > thin
+            horizontal = oh <= thin and ow >= 6 * oh
             if horizontal and top + 0.15 * (bottom - top) < oy < bottom and ox < right and ox + ow > left:
                 set_geometry(other, y=bottom + int(EMU_PER_INCH * 0.05))
 
@@ -572,7 +676,7 @@ def photo_slide_indices(deck: DeckModel, template_path: Any, profile: Any = None
     kept = [i for i, s in enumerate(deck.slides) if not _is_slide_empty(s)]
     kinds = [slide_kind(deck.slides[i], n) for n, i in enumerate(kept)]
     bases = assign_bases(kinds, design)
-    wanted = [i for i, base, kind in zip(kept, bases, kinds, strict=True) if base.photo_shapes or base.frame_shapes]
+    wanted = [i for i, base, kind in zip(kept, bases, kinds, strict=True) if base.photo_shapes or base.frame_shapes or getattr(base, "sample_photos", None)]
     return sorted(wanted, key=lambda i: 0 if slide_kind(deck.slides[i], kept.index(i)) == "cover" else 1)
 
 

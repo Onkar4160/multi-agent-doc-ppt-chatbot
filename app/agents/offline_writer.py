@@ -30,10 +30,18 @@ def _clean(statement: str) -> str:
 
 
 def _label(statement: str, words: int = 6) -> str:
+    from app.services.copyfit import smart_trim
+
     s = _clean(statement).rstrip(".")
     s = re.sub(r"^(the|a|an)\s+", "", s, flags=re.I)
-    parts = s.split()
-    return " ".join(parts[:words])
+    return smart_trim(s, words, min_words=min(3, words))
+
+
+def _figure(c: ClaimRef) -> str:
+    from app.services.copyfit import format_number
+
+    unit = (c.unit or "").strip()
+    return f"{format_number(c.value)}{unit}" if unit in ("%", "x") else f"{format_number(c.value)} {unit}".strip()
 
 
 def main_unit(claims: list[ClaimRef]) -> str:
@@ -73,7 +81,7 @@ def write_slide(sp: SlidePlan, claims: list[ClaimRef], *, deck_title: str = "", 
             slide.blocks.append(CalloutBlock(text=_clean(sp.key_message), source_ids=sids))
     elif a == "kpi":
         numeric = [c for c in items if c.numeric][:4]
-        slide.blocks = [KpiBlock(items=[KpiItem(value=f"{c.value:g} {c.unit or ''}".strip(), label=_label(c.statement),
+        slide.blocks = [KpiBlock(items=[KpiItem(value=_figure(c), label=_label(c.statement, 10),
                                                 source_ids=c.source_ids) for c in numeric],
                                  source_ids=sids, claim_ids=[c.id for c in numeric])]
     elif a == "timeline":
@@ -99,7 +107,7 @@ def write_slide(sp: SlidePlan, claims: list[ClaimRef], *, deck_title: str = "", 
                                    source_ids=lead.source_ids if lead else [])]
     elif a == "table":
         slide.blocks = [TableBlock(headers=["Finding", "Figure", "As of"],
-                                   rows=[[_label(c.statement, 10), f"{c.value:g} {c.unit or ''}".strip() if c.numeric else "",
+                                   rows=[[_label(c.statement, 10), _figure(c) if c.numeric else "",
                                           c.as_of or ""] for c in items], source_ids=sids, claim_ids=[c.id for c in items])]
     elif a == "image_text":
         slide.blocks = [ImageBlock(description=sp.headline, alt_text=sp.headline)]

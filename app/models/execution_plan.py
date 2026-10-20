@@ -151,6 +151,11 @@ class ExecutionPlan(BaseModel):
         default="",
         description="Standalone rewritten instruction with conversational references resolved.",
     )
+    subject: str = Field(
+        default="",
+        description="What the deliverable is about, resolved from the conversation (e.g. 'Generative AI in 2026'); "
+                    "never a pronoun or a phrase like 'this same'.",
+    )
     confidence: float = Field(
         default=1.0,
         description="Confidence score in the intent resolution (0.0 to 1.0).",

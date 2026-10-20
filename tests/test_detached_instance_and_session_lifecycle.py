@@ -133,7 +133,7 @@ def test_failure_before_commit_leaves_no_new_version(fresh_engine):
 def test_consecutive_edits_with_new_session_per_node(fresh_engine):
     """Test (a): Use a NEW session per node call, closed after each node.
     Run: generate -> edit 'add a section on X' -> edit 'add an executive summary'.
-    Assert: no DetachedInstanceError, versions v2 and v3 exist, same artifact ids, reply starts with 'Edited: ...', diff present.
+    Assert: no DetachedInstanceError, versions v2 and v3 exist, same artifact ids, reply starts with "Updated **...", diff present.
     """
     Session = sessionmaker(bind=fresh_engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
@@ -206,7 +206,7 @@ def test_consecutive_edits_with_new_session_per_node(fresh_engine):
                 res1 = node_edit(state_edit1)
 
     assert "reply" in res1
-    assert res1["reply"].startswith("Edited: Enterprise AI Overview")
+    assert res1["reply"].startswith("Updated **Enterprise AI Overview")
     assert "v1 -> v2" in res1["reply"]
     assert "diff" in res1["artifacts"][0]
     assert res1["artifacts"][0]["version"] == 2
@@ -236,7 +236,7 @@ def test_consecutive_edits_with_new_session_per_node(fresh_engine):
                 res2 = node_edit(state_edit2)
 
     assert "reply" in res2
-    assert res2["reply"].startswith("Edited: Enterprise AI Overview")
+    assert res2["reply"].startswith("Updated **Enterprise AI Overview")
     assert "v2 -> v3" in res2["reply"]
     assert "diff" in res2["artifacts"][0]
     assert res2["artifacts"][0]["version"] == 3

@@ -46,6 +46,7 @@ class ResolvedReferences(BaseModel):
 
 
 PRONOUN_PATTERN = re.compile(r"\b(it|this|that|them|these|those)\b", re.IGNORECASE)
+OBJECT_PRONOUN_PATTERN = re.compile(r"\b(it|them)\b", re.IGNORECASE)
 DOC_REFERENCE_PATTERN = re.compile(
     r"\b(?:the\s+(?:first\s+|second\s+|third\s+|initial\s+|prior\s+|previous\s+|last\s+|same\s+)?(?:document|report|proposal|word\s+doc|word\s+document)|same\s+(?:document|report|proposal|word\s+doc)|first\s+(?:document|report|proposal)|second\s+(?:document|report|proposal)|initial\s+(?:document|report|proposal)|this\s+(?:document|report|proposal))\b",
     re.IGNORECASE,
@@ -293,15 +294,13 @@ def resolve_references(
         res.target_artifact_id = resolved_art.get("artifact_id")
 
     # 6. Build resolved_message (rewritten instruction)
+    # Only object pronouns name the file ("make it shorter"); "this"/"that" are usually determiners
+    # ("use this template", "on this topic") and rewriting them changes the meaning.
     resolved_msg = user_message
     if has_pronoun and resolved_art:
-        art_kind = resolved_art.get("kind", "")
-        if art_kind == "pptx":
-            resolved_msg = PRONOUN_PATTERN.sub("the presentation", resolved_msg, count=1)
-        elif art_kind == "docx":
-            resolved_msg = PRONOUN_PATTERN.sub("the document", resolved_msg, count=1)
-        elif art_kind == "xlsx":
-            resolved_msg = PRONOUN_PATTERN.sub("the workbook", resolved_msg, count=1)
+        noun = {"pptx": "the presentation", "docx": "the document", "xlsx": "the workbook"}.get(resolved_art.get("kind", ""))
+        if noun:
+            resolved_msg = OBJECT_PRONOUN_PATTERN.sub(noun, resolved_msg, count=1)
     res.resolved_message = resolved_msg
     res.reasoning = reasoning
 

@@ -50,13 +50,23 @@ USER MESSAGE:
 
 CONVERSATION CONTEXT:
 Active Topic: {active_topic}
+Subjects discussed so far (most recent first): {subject_history}
 Conversation Summary: {conversation_summary}
 Existing Artifacts in Session:
 {session_artifacts_summary}
-Recent Messages:
+Whole conversation so far (oldest first; the last user line is the message above):
 {recent_messages_summary}
 
 SEMANTIC REASONING GUIDELINES:
+0. Read the message as the next turn of THIS conversation. Follow-ups often do not restate their subject
+   ("make a document as well on this same", "use this template and give me the presentation as same", "a report on
+   him", "do the same in Excel"). Resolve every such reference from the conversation:
+   - `subject`: what the deliverable is about, in a few words (e.g. "Generative AI in 2026"). Never a pronoun,
+     never words like "this", "same", "it", "the template" or the request itself. For a follow-up, it is the subject
+     of the earlier work the message refers to.
+   - `user_instruction`: the request rewritten so it reads on its own, with the subject written out and every
+     constraint kept (format, length, audience, tone), e.g. "Create a Word report on Generative AI in 2026".
+   - `topic`: the same as `user_instruction`.
 1. `goal`: State the overarching user goal clearly in 1 concise sentence.
 2. `operation`:
    - CREATE: Create a new document, presentation, or workbook from scratch or from source materials.
@@ -382,15 +392,17 @@ def parse_plan(
     else:
         session_artifacts_summary = "(None - fresh session)"
 
+    turns = conv_ctx.transcript or conv_ctx.recent_messages
     recent_messages_summary = (
-        "\n".join(f"- {m.get('role', 'user')}: {m.get('content', '')[:120]}" for m in conv_ctx.recent_messages[-4:])
-        if conv_ctx.recent_messages
+        "\n".join(f"- {m.get('role', 'user')}: {m.get('content', '')[:600]}" for m in turns)
+        if turns
         else "(None)"
     )
 
     prompt = SUPERVISOR_PROMPT.format(
         user_message=user_message,
         active_topic=active_topic,
+        subject_history="; ".join(conv_ctx.subject_history[:8]) or "(none yet)",
         conversation_summary=conv_summary,
         session_artifacts_summary=session_artifacts_summary,
         recent_messages_summary=recent_messages_summary,
@@ -421,11 +433,11 @@ def parse_plan(
                 file_ids=file_ids,
                 user_prompt=user_message,
             )
-            has_ambiguous_tmpl = any(c.is_ambiguous for c in classifications)
-            if has_ambiguous_tmpl:
-                plan.error = "AMBIGUOUS_TEMPLATES"
-                ambig_names = [c.filename for c in classifications if c.is_ambiguous]
-                plan.reasoning = f"Multiple candidate templates detected ({', '.join(ambig_names)}). Please specify which template to use."
+            # Several possible templates do not stop the request: template resolution picks the best match (purpose,
+            # name mentioned in the message, newest) and the reply names the one used.
+            ambig_names = [c.filename for c in classifications if c.is_ambiguous]
+            if ambig_names:
+                plan.output_requirements["template_choice_from"] = ambig_names
 
             tmpl_ids = [c.file_id for c in classifications if c.role == FileRole.TEMPLATE]
             src_ids = [c.file_id for c in classifications if c.role in (FileRole.SOURCE, FileRole.REFERENCE)]

@@ -258,9 +258,17 @@ def gather_sources(
         queries = list(dict.fromkeys(q for pq in questions for q in pq.queries[:1] + pq.queries[1:2]))[: settings_cfg["queries"]]
         domain_counts: dict[str, int] = {}
         found = 0
-        for query in queries:
+        academic = re.search(r"\b(research|study|studies|paper|academic|scientific|evidence|literature|clinical|technolog)",
+                             topic, re.I)
+        want_papers = settings_cfg["scholarly"] and (academic or not named_subject)
+        scholarly = scholarly or web_research._search_scholarly_cached
+        # Searches are independent network calls: run them side by side (wall time = the slowest one).
+        pool = _pool(len(queries) + 1)
+        papers_future = pool.submit(_in_context(scholarly), topic, today) if want_papers else None
+        futures = [pool.submit(_in_context(search), q, today, settings_cfg["per_query"]) for q in queries]
+        for query, fut in zip(queries, futures):
             try:
-                results = search(query, today, settings_cfg["per_query"])
+                results = fut.result()
             except Exception as exc:
                 errors.append(f"web search failed for '{query}': {exc.__class__.__name__}")
                 continue
@@ -299,14 +307,12 @@ def gather_sources(
         else:
             errors.append("web search returned no usable results")
         # Papers help on research topics, not on biographies or named events, unless the request asks for them.
-        academic = re.search(r"\b(research|study|studies|paper|academic|scientific|evidence|literature|clinical|technolog)",
-                             topic, re.I)
-        if settings_cfg["scholarly"] and (academic or not named_subject):
+        pool.shutdown(wait=False)
+        if papers_future is not None:
             from app.services.academic_search import scholarly_title
 
-            scholarly = scholarly or web_research._search_scholarly_cached
             try:
-                papers = scholarly(topic, today)
+                papers = papers_future.result()
             except Exception as exc:
                 papers = []
                 errors.append(f"scholarly search failed: {exc.__class__.__name__}")
@@ -322,8 +328,10 @@ def gather_sources(
         fetch = None if offline else fetch_text  # tests never read live pages unless they inject a fetcher
     if use_web and settings_cfg["fetch"] and fetch is not None:
         pages_read = 0
-        for g in [g for g in ranked if g.record.kind == "web"][: settings_cfg["fetch"]]:
-            page = fetch(g.record.url or "")
+        targets = [g for g in ranked if g.record.kind == "web"][: settings_cfg["fetch"]]
+        with _pool(len(targets)) as pages_pool:
+            pages = list(pages_pool.map(lambda g: _safe_fetch(fetch, g.record.url or ""), targets))
+        for g, page in zip(targets, pages):
             if page:
                 passages = best_passages(page, wanted, READ_PAGE_CHARS)
                 if passages:
@@ -334,6 +342,27 @@ def gather_sources(
         if pages_read:
             used.append("page reading")
     return ranked, used, errors
+
+
+def _pool(n: int):
+    from concurrent.futures import ThreadPoolExecutor
+
+    return ThreadPoolExecutor(max_workers=max(1, min(8, n)), thread_name_prefix="research")
+
+
+def _in_context(fn):
+    """Run ``fn`` in a worker with the run's context (log run ID, budgets)."""
+    import contextvars
+
+    ctx = contextvars.copy_context()
+    return lambda *a, **kw: ctx.copy().run(fn, *a, **kw)
+
+
+def _safe_fetch(fetch, url: str):
+    try:
+        return fetch(url)
+    except Exception:  # an unreadable page only loses its extra text
+        return None
 
 
 # ── Extraction and verification ───────────────────────────────────────────────

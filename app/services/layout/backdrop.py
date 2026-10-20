@@ -100,6 +100,40 @@ def _solid(shape) -> str | None:
     return None
 
 
+def _gradient(shape, box: Box, point: tuple[float, float]) -> str | None:
+    """Colour of a shape's linear gradient fill at ``point`` (stops interpolated along the gradient's angle)."""
+    import math
+
+    sp_pr = shape._element.find("{http://schemas.openxmlformats.org/presentationml/2006/main}spPr")
+    grad = sp_pr.find(f"{_A}gradFill") if sp_pr is not None else None
+    if grad is None:
+        return None
+    stops = []
+    for gs in grad.iter(f"{_A}gs"):
+        clr = gs.find(f"{_A}srgbClr")
+        val = clr.get("val") if clr is not None else None
+        if val is None:
+            scheme = gs.find(f"{_A}schemeClr")
+            val = _scheme_color(shape.part, scheme.get("val")) if scheme is not None else None
+        if val:
+            stops.append((int(gs.get("pos", "0")) / 100000, val.upper()))
+    if not stops:
+        return None
+    stops.sort()
+    lin = grad.find(f"{_A}lin")
+    ang = math.radians(int(lin.get("ang", "0")) / 60000) if lin is not None else 0.0
+    x, y, w, h = box
+    dx, dy = math.cos(ang), math.sin(ang)
+    corners = [cx * dx + cy * dy for cx in (x, x + w) for cy in (y, y + h)]
+    lo, hi = min(corners), max(corners)
+    t = min(max(((point[0] * dx + point[1] * dy) - lo) / ((hi - lo) or 1), 0.0), 1.0)
+    for (p0, c0), (p1, c1) in zip(stops, stops[1:]):
+        if p0 <= t <= p1:
+            f = (t - p0) / ((p1 - p0) or 1)
+            return "".join(f"{round(int(c0[i:i + 2], 16) * (1 - f) + int(c1[i:i + 2], 16) * f):02X}" for i in (0, 2, 4))
+    return stops[0][1] if t < stops[0][0] else stops[-1][1]
+
+
 def _blob(shape, slide) -> bytes | None:
     blip = next(shape._element.iter(f"{_A}blip"), None)
     rid = blip.get(_R_EMBED) if blip is not None else None
@@ -179,7 +213,7 @@ def color_under(slide, area: Box, *, stop_at=None, default: str | None = "FFFFFF
             break
         if not (x <= cx <= x + w and y <= cy <= y + h):
             continue
-        color = _solid(shape)
+        color = _solid(shape) or _gradient(shape, (x, y, w, h), (cx, cy))
         if color is None:
             blob = _blob(shape, slide)
             if blob is not None:

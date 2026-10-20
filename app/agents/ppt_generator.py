@@ -23,6 +23,7 @@ from app.services.ir_compat import role_for
 from app.services.length_rules import deck_length
 from app.services.plan_inputs import ClaimRef, by_id, digest_from_evidence, format_digest
 from app.services.plan_validation import FRAME_ARCHETYPES
+from app.services.slide_polish import polish_deck
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +71,10 @@ Person: {person}
 
 
 def _org_identity(profile: TemplateProfile | None) -> str:
-    identity = ("Neutral, professional author. Do not assume or invent any specific company name or location unless "
-                "explicitly provided in the brief or evidence pack.")
-    if profile and profile.source_name:
-        clean = profile.source_name.replace(".docx", "").replace(".pptx", "").replace("_", " ").strip()
-        if clean and clean.lower() not in ("company proposal", "company template", "template", "default"):
-            identity = f"Organization / Brand: {clean}"
-    return identity
+    # A template's file name ("Grey Modern Minimal Project Presentation") describes its look, not who is presenting:
+    # it must never appear on the slides as an organisation or subtitle.
+    return ("Neutral, professional author. Do not assume or invent any specific company name or location unless "
+            "explicitly provided in the brief or evidence pack. Never use the template's name in the slides.")
 
 
 def _plan_json(plan: DeckPlan) -> str:
@@ -103,6 +101,7 @@ def conform_deck(deck: DeckModel, plan: DeckPlan, claims: list[ClaimRef]) -> lis
         if slide is None or empty:
             slide = write_slide(sp, claims, deck_title=plan.title, agenda=agenda)
             fixes.append(f"slide {i + 1} written from its plan")
+        _conform_blocks(slide, sp)
         slide.archetype = sp.archetype
         slide.role = role_for(sp.archetype)
         slide.key_message = slide.key_message or sp.key_message
@@ -113,6 +112,23 @@ def conform_deck(deck: DeckModel, plan: DeckPlan, claims: list[ClaimRef]) -> lis
         out.append(slide)
     deck.slides = out
     return fixes
+
+
+def _conform_blocks(slide: Any, sp: Any) -> None:
+    """Visuals the plan did not ask for become points: the planner balanced the deck's archetypes (one KPI slide,
+    one chart…), and a writer that turns every slide into KPI tiles undoes that balance."""
+    from app.models.deck_model import SlideBulletsBlock
+    from app.services.ir_compat import block_bullets
+    from app.services.renderers.pptx_archetypes import VISUAL_TYPES
+
+    allowed = set(sp.blocks) | ({sp.archetype} & VISUAL_TYPES)
+    blocks = []
+    for blk in slide.blocks:
+        kind = getattr(blk, "type", "")
+        if kind in VISUAL_TYPES and kind not in allowed:
+            blk = SlideBulletsBlock(items=block_bullets(blk), claim_ids=list(getattr(blk, "claim_ids", []) or []))
+        blocks.append(blk)
+    slide.blocks = blocks
 
 
 def _stamp_date(deck: DeckModel, today: str) -> None:
@@ -150,7 +166,7 @@ def generate_deck_model(
     if is_offline(llm_client):
         deck = write_deck(plan, claims)
         _stamp_date(deck, today)
-        return deck
+        return polish_deck(deck)
 
     tone = profile.tone if profile else None
     fields = dict(
@@ -175,9 +191,22 @@ def generate_deck_model(
     fixes = conform_deck(deck, plan, claims)
     if fixes:
         logger.info("Deck conformed to its plan: %s", "; ".join(fixes))
-    deck.title = deck.title or plan.title
+    _keep_plan_title(deck, plan, brief)
     _stamp_date(deck, today)
-    return deck
+    return polish_deck(deck)
+
+
+def _keep_plan_title(deck: DeckModel, plan: DeckPlan, brief: str) -> None:
+    """The deck is titled by its subject: a writer title that is empty or merely repeats the request yields."""
+    from app.services.conversation_memory import _echo, is_substantive
+
+    for current, set_ in ((deck.title, lambda t: setattr(deck, "title", t)),
+                          (deck.slides[0].title if deck.slides and deck.slides[0].role == "title" else None,
+                           lambda t: setattr(deck.slides[0], "title", t))):
+        if current is None:
+            continue
+        if not is_substantive(current or "") or _echo(current, brief):
+            set_(plan.title)
 
 
 def _format_sources_as_evidence(sources: list[dict[str, Any]]) -> str:

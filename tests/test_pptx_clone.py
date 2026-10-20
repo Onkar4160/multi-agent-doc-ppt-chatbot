@@ -79,7 +79,8 @@ def test_sample_templates_keep_their_design(template: Path, tmp_path: Path):
             assert int(sh.left) + int(sh.width) <= prs.slide_width and int(sh.top) + int(sh.height) <= prs.slide_height
             tf = sh.text_frame
             paras = [Para(p.text, p.runs[0].font.size.pt, font=p.runs[0].font.name) for p in tf.paragraphs if p.runs and p.runs[0].font.size]
-            width = int(sh.width) - int(tf.margin_left or 91440) - int(tf.margin_right or 91440)
+            # an explicit zero inset is a real inset (templates often set lIns="0"), not a missing one
+            width = int(sh.width) - int(tf.margin_left) - int(tf.margin_right)
             assert measure(paras, width).height_emu <= int(sh.height) * 1.02, f"slide {n} {sh.name} overflows"
 
 

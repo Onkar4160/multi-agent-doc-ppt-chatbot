@@ -175,6 +175,9 @@ def render_pptx(
     """
     destination = Path(out_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    from app.services.slide_polish import polish_deck
+
+    deck = polish_deck(deck.model_copy(deep=True))  # before legacy_view flattens blocks into bullets
     if template_path is None:  # no template: generated design system (FR-PPTX-3)
         from app.services.renderers.pptx_generated import render_generated
 
@@ -182,12 +185,16 @@ def render_pptx(
         cited = {sid for s in deck.slides for sid in s.source_ids} | {
             sid for s in deck.slides for b in s.bullets + s.left + s.right for sid in b.source_ids} | {
             sid for s in deck.slides for b in s.blocks for sid in (getattr(b, "source_ids", None) or [])}
-        render_generated(deck, destination, design_hint=design_hint, source_entries=_source_entries(cited, sources_map) if cited else None)
+        render_generated(deck, destination, design_hint=design_hint, photos=photos,
+                         source_entries=_source_entries(cited, sources_map) if cited else None)
         return destination
     tmpl_path = Path(template_path)
 
     if not tmpl_path.exists():
         raise FileNotFoundError(f"PPTX template file not found: {template_path}")
+    from app.services.layout.fonts import register_embedded_fonts
+
+    register_embedded_fonts(tmpl_path)  # measure with the fonts PowerPoint will use
 
     deck = legacy_view(deck)  # typed blocks shown as bullets/columns until the archetype renderers (Stage 8)
 
@@ -228,6 +235,7 @@ def render_pptx(
 
     # 3. Render slides
     for slide_idx, slide_model in enumerate(deck.slides, start=1):
+        photo = (photos or {}).get(slide_idx - 1)
         if _is_slide_empty(slide_model):
             logger.warning(
                 "Skipping empty slide %d ('%s', role='%s') with zero content",
@@ -280,9 +288,12 @@ def render_pptx(
                 _set_fitted_title(slide.shapes.title, slide_model.title, is_cover=False)
             if slide_model.bullets:
                 _fill_content_placeholder(slide, slide_model.bullets, all_referenced_source_ids)
+            if photo is not None and not _picture_placeholders(slide):
+                _side_photo(slide, prs, photo)
+                photo = None
 
-        # Handle picture placeholders on layout
-        _process_picture_placeholders(slide)
+        # Picture placeholders take the slide's photo; without one they are removed (never filler art)
+        _process_picture_placeholders(slide, photo)
 
         # Remove any empty/unused text placeholders
         _remove_unused_placeholders(slide)
@@ -569,13 +580,10 @@ def _populate_text_frame(
         else:
             p = tf.add_paragraph()
 
-        # Word wrap check per bullet (12-20 words)
-        clean_text = strip_markdown(b_item.text)
-        words = clean_text.split()
-        if len(words) > 22:
-            text_str = " ".join(words[:22]) + "..."
-        else:
-            text_str = clean_text
+        # Long points end at a clause boundary, never mid-sentence with "..."; citations are added once below
+        from app.services.copyfit import smart_trim, strip_citations
+
+        text_str = smart_trim(strip_citations(strip_markdown(b_item.text)), 22)
 
         if b_item.source_ids:
             unique_ids = sorted(list(set(b_item.source_ids)))
@@ -590,28 +598,47 @@ def _populate_text_frame(
 
 # ── Picture & Placeholder Clean-up ─────────────────────────────────────────
 
-def _process_picture_placeholders(slide: Any) -> None:
-    """Fill picture placeholders with generated abstract image or delete if unfilled."""
-    pic_shapes = [
-        shape for shape in slide.placeholders
-        if shape.placeholder_format.type == pptx.enum.shapes.PP_PLACEHOLDER.PICTURE
-    ]
+def _picture_placeholders(slide: Any) -> list[Any]:
+    return [s for s in slide.placeholders if s.placeholder_format.type == pptx.enum.shapes.PP_PLACEHOLDER.PICTURE]
 
-    for pic_shape in pic_shapes:
-        try:
-            # Generate abstract theme image matching placeholder aspect ratio
-            w_in = pic_shape.width.inches if pic_shape.width else 4.0
-            h_in = pic_shape.height.inches if pic_shape.height else 3.0
-            img_path = _generate_abstract_theme_image(w_in, h_in)
 
-            # Insert picture into placeholder
-            pic_shape.insert_picture(str(img_path))
-            if img_path.exists():
-                img_path.unlink()
-        except Exception as exc:
-            logger.warning("Failed to fill picture placeholder: %s. Deleting placeholder shape.", exc)
-            sp = pic_shape.element
-            sp.getparent().remove(sp)
+def _process_picture_placeholders(slide: Any, photo: Any = None) -> None:
+    """The first picture placeholder gets the slide's photo (cropped to fill); unfilled ones are removed.
+
+    Generated filler art is never used: its colours ignore the template and it carries no meaning.
+    """
+    for i, pic_shape in enumerate(_picture_placeholders(slide)):
+        if i == 0 and photo is not None:
+            try:
+                pic = pic_shape.insert_picture(str(photo.path))
+                pic.name = "content:image"
+                pic._element.nvPicPr.cNvPr.set("descr", photo.alt_text[:500])
+                continue
+            except Exception as exc:
+                logger.warning("Photo did not fit the picture placeholder: %s", exc)
+        sp = pic_shape.element
+        sp.getparent().remove(sp)
+
+
+def _side_photo(slide: Any, prs: pptx.Presentation, photo: Any) -> None:
+    """Narrow the body to the left and place the photo in a panel on the right (text and picture never overlap)."""
+    from app.services.renderers.pptx_canvas import Canvas, CanvasLog, Rect
+    from app.services.renderers.pptx_media import round_corners, split_for_photo
+
+    bodies = [sh for sh in slide.placeholders if sh != slide.shapes.title and sh.has_text_frame and sh.width]
+    scale = prs.slide_height / 914400 / 7.5
+    if bodies:
+        b = bodies[0]
+        region = Rect(b.left / 914400, b.top / 914400, b.width / 914400, b.height / 914400)
+    else:
+        sw, sh_ = prs.slide_width / 914400, prs.slide_height / 914400
+        region = Rect(sw * 0.07, sh_ * 0.25, sw * 0.86, sh_ * 0.65)
+    text_r, photo_r = split_for_photo(region, scale)
+    if bodies:
+        bodies[0].left, bodies[0].top = int(text_r.x * 914400), int(text_r.y * 914400)
+        bodies[0].width, bodies[0].height = int(text_r.w * 914400), int(text_r.h * 914400)
+    pic = Canvas(slide, CanvasLog(), scale=scale).picture(photo_r, photo.path, name="content:image", alt=photo.alt_text)
+    round_corners(pic)
 
 
 def _remove_unused_placeholders(slide: Any) -> None:

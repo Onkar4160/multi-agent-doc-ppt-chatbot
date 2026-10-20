@@ -111,8 +111,9 @@ def convert_artifact(
     if not ver_rec:
         raise ValueError(f"Version history for artifact {artifact_id} not found.")
 
-    output_dir = Path("data/outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    from app.services.render_context import output_dir as _out
+
+    output_dir = _out()
 
     # Check for active workspace templates & profiles
     active_ws = (

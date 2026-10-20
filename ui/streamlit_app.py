@@ -39,6 +39,7 @@ STEP_LABELS = {
     "plan_node": "Understanding the request",
     "analyze_templates_node": "Studying the template",
     "gather_context_node": "Researching sources",
+    "plan_content_node": "Planning the storyline",
     "generate_doc_node": "Writing the document",
     "generate_deck_node": "Building the slides",
     "generate_sheet_node": "Building the spreadsheet",
@@ -319,6 +320,8 @@ def _progress(placeholder, steps: list[dict], status: str, elapsed: float) -> No
                 name = step.get("agent_name", "?")
                 if name in seen:
                     continue
+                if name.startswith("generate_") and step.get("status") == "ok" and (step.get("duration_ms") or 0) < 50:
+                    continue  # a format that was not requested: the step was skipped, not done
                 seen.append(name)
                 text = STEP_LABELS.get(name, name.replace("_node", "").replace("_", " ").capitalize())
                 ok = step.get("status") == "ok"

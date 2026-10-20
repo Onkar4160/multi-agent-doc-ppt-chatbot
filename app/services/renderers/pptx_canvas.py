@@ -299,6 +299,10 @@ class Canvas:
         ]
         width = int(ph.width) - int(tf.margin_left) - int(tf.margin_right)
         height = int(ph.height) - int(tf.margin_top) - int(tf.margin_bottom)
+        from app.services.layout.fonts import has_exact_metrics
+
+        if specs and not has_exact_metrics(specs[0].font):
+            width = int(width * 0.94)  # PowerPoint will substitute this font: leave room for wider glyphs
         fitted, ok = fit_paragraphs(specs, width, height, min_pt=min_pt * self.scale)
         # Template boxes are sized to their sample words; grow (downwards) rather than overflow.
         # The 10% margin covers inherited line spacing the measurement cannot see.
@@ -355,12 +359,16 @@ class Canvas:
             top = top + (height - needed) // 2
         set_geometry(shape, y=top, h=needed)
 
-    def separate(self, upper, lower) -> None:
-        """Move ``lower`` down when ``upper`` now overlaps it (titles can grow to two lines)."""
+    def separate(self, upper, lower, attached=None) -> None:
+        """Move ``lower`` (and a frame ``attached`` to it) down when ``upper`` now overlaps it (titles can grow)."""
+        top = min(int(lower.top), int(attached.top)) if attached is not None else int(lower.top)
         bottom = int(upper.top) + int(upper.height)
-        overlaps = int(lower.top) < bottom and int(lower.top) + int(lower.height) > int(upper.top)
+        overlaps = top < bottom and int(lower.top) + int(lower.height) > int(upper.top)
         if overlaps and int(lower.top) >= int(upper.top):
-            set_geometry(lower, y=bottom + inch(0.08))
+            shift = bottom + inch(0.08) - top
+            set_geometry(lower, y=int(lower.top) + shift)
+            if attached is not None:
+                set_geometry(attached, y=int(attached.top) + shift)
 
     def notes(self, text: str | None) -> None:
         if text:

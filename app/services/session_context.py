@@ -56,6 +56,7 @@ def build_conversation_context(
         }
         for m in raw_msgs
     ]
+    transcript = _transcript(session_id, db)
 
     # 2. Fetch session-scoped artifacts
     session_artifacts = (
@@ -217,6 +218,24 @@ def build_conversation_context(
         active_art = next((a for a in artifacts_data if a["active"]), artifacts_data[-1])
         active_topic = active_art["title"]
 
+    # Subjects of every deliverable in the conversation (the planner's resolved subject, else read from its topic),
+    # then artifact titles; the newest substantive one is the active topic follow-ups refer to.
+    from app.services.conversation_memory import is_substantive, subjects_from_runs
+
+    plans = []
+    for r in runs:
+        try:
+            plans.append(json.loads(r.plan_json) if r.plan_json else {})
+        except Exception:
+            continue
+    subjects = subjects_from_runs(plans)
+    for a in reversed(artifacts_data):
+        title = str(a.get("title") or "")
+        if is_substantive(title) and title.lower() not in {s.lower() for s in subjects}:
+            subjects.append(title)
+    if subjects:
+        active_topic = subjects[0]
+
     # 5. Active Template
     active_template = None
     try:
@@ -280,7 +299,40 @@ def build_conversation_context(
         active_artifact_id=active_art_dict.get("artifact_id") if active_art_dict else None,
         active_version_no=active_version_num,
         last_target_nodes=last_target_nodes,
+        transcript=transcript,
+        subject_history=subjects,
     )
+
+
+TRANSCRIPT_BUDGET = 6000  # characters; the oldest turns are dropped first
+
+
+def _transcript(session_id: str, db: Session) -> list[dict[str, Any]]:
+    """Every turn of the conversation, condensed: the user's words in full, replies to their first lines."""
+    import re
+
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.id.desc())
+        .limit(80)
+        .all()
+    )
+    turns: list[dict[str, Any]] = []
+    size = 0
+    for m in rows:  # newest first, so the budget keeps the most recent turns
+        text = m.content or ""
+        if m.role != "user":
+            text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)  # links -> their labels
+            text = " ".join(line.strip("#>*- ") for line in text.splitlines() if line.strip())[:240]
+        else:
+            text = text.strip()[:600]
+        if size + len(text) > TRANSCRIPT_BUDGET and turns:
+            break
+        size += len(text)
+        turns.append({"role": m.role, "content": text})
+    turns.reverse()
+    return turns
 
 
 def build_session_context(

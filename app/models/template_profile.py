@@ -12,7 +12,7 @@ from app.models.base import TimestampMixin
 
 
 # Bump when analysis output changes so cached profiles are recomputed (2: designed sample-slide bases).
-ANALYZER_VERSION = 3  # 3: element inventory, layout archetypes, DOCX/XLSX manifests, design tokens
+ANALYZER_VERSION = 5  # 3: element inventory, layout archetypes, DOCX/XLSX manifests, design tokens; 4: neutral accents; 5: sample photos, blocked titles
 
 
 # ──────── Pydantic v2 Schemas ──────────────────────────────────────────────
@@ -111,10 +111,13 @@ class SlideBase(BaseModel):
     remove_shapes: list[int] = Field(default_factory=list, description="sample text/content to drop")
     photo_shapes: list[int] = Field(default_factory=list, description="empty picture placeholders")
     frame_shapes: list[int] = Field(default_factory=list, description="plain light boxes that frame a photo")
+    sample_photos: list[int] = Field(default_factory=list,
+                                     description="shapes holding a sample photograph (kept shape, picture swapped)")
     region: Box | None = Field(None, description="content area freed by the removed sample text")
     score: float = 0.0
     title_text: str = ""
     region_color: str | None = Field(None, description="colour behind the content region")
+    title_blocked: bool = Field(False, description="artwork crowds the title slot once it holds a real headline")
 
 
 class SlideDesign(BaseModel):

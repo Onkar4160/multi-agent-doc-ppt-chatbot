@@ -60,7 +60,8 @@ def _cite(ids: list[int]) -> str:
 
 
 def render_generated(deck: DeckModel, out_path: str | Path, *, design_hint: str = "",
-                     source_entries: list[str] | None = None) -> tuple[Path, CanvasLog, set[int]]:
+                     source_entries: list[str] | None = None,
+                     photos: dict[int, Any] | None = None) -> tuple[Path, CanvasLog, set[int]]:
     from app.services.pptx_renderer import strip_markdown
 
     prs = Presentation()
@@ -70,20 +71,29 @@ def render_generated(deck: DeckModel, out_path: str | Path, *, design_hint: str 
     palette = with_overrides(palette, deck.style)
     log = CanvasLog()
     cited: set[int] = set()
+    credits: list[str] = []
     for n, s in enumerate(deck.slides, start=1):
         slide = prs.slides.add_slide(blank)
         c = Canvas(slide, log)
         title = strip_markdown(s.title)
+        photo = (photos or {}).get(n - 1)
         if s.role == "title":
-            _cover(c, title, strip_markdown(s.subtitle or deck.subtitle or ""), palette, dark)
+            _cover(c, title, strip_markdown(s.subtitle or deck.subtitle or ""), palette, dark, photo=photo)
         elif s.role in ("section_header", "title_only") and not has_visual(s.blocks):
+            photo = None
             _statement(c, title, strip_markdown(s.subtitle or s.key_message or ""), palette,
                        dark=s.role == "section_header")
         else:
-            _content(c, s, title, palette, cited)
+            photo = photo if not has_visual(s.blocks) else None
+            _content(c, s, title, palette, cited, photo=photo)
             _footer(c, n, palette)
-        if s.notes:
-            c.notes(strip_markdown(s.notes))
+        notes = strip_markdown(s.notes or "")
+        if photo is not None:
+            credits.append(f"Image: {photo.credit} - {photo.landing_url}")
+            notes = f"{notes}\n\n{photo.credit} ({photo.landing_url})".strip()
+        if notes:
+            c.notes(notes)
+    source_entries = list(source_entries or []) + list(dict.fromkeys(credits))
     if source_entries:
         slide = prs.slides.add_slide(blank)
         c = Canvas(slide, log)
@@ -96,14 +106,19 @@ def render_generated(deck: DeckModel, out_path: str | Path, *, design_hint: str 
     return out, log, cited
 
 
-def _cover(c: Canvas, title: str, subtitle: str, pal: Palette, dark: str = DARK) -> None:
+def _cover(c: Canvas, title: str, subtitle: str, pal: Palette, dark: str = DARK, photo: Any = None) -> None:
     c.background(dark)
+    text_w = W - 2 * MARGIN
+    if photo is not None:  # photo full-bleed on the right, title on the dark panel at the left
+        split = W * 0.56
+        c.picture(Rect(split, 0, W - split, H - 0.35), photo.path, name="content:image", alt=photo.alt_text)
+        text_w = split - MARGIN - 0.5
     c.rect(Rect(0, H - 0.35, W, 0.35), pal.accent, "decor:cover-band")
     c.rect(Rect(MARGIN, 3.55, 1.6, 0.08), pal.accent2, "decor:cover-rule")
-    c.text(Rect(MARGIN, 1.4, W - 2 * MARGIN, 2.05), [BulletPara(_p(title, 44, pal, bold=True, heading=True))],
-           TextStyle("FFFFFF", anchor="bottom"), name="content:title", min_pt=28)
+    c.text(Rect(MARGIN, 1.0, text_w, 2.45), [BulletPara(_p(title, 44 if photo is None else 38, pal, bold=True, heading=True))],
+           TextStyle("FFFFFF", anchor="bottom"), name="content:title", min_pt=26)
     if subtitle:
-        c.text(Rect(MARGIN, 3.8, W - 2 * MARGIN, 1.2), [BulletPara(_p(subtitle, 20, pal))], TextStyle("C9D6E3"),
+        c.text(Rect(MARGIN, 3.8, text_w, 1.6), [BulletPara(_p(subtitle, 20, pal))], TextStyle("C9D6E3"),
                name="content:subtitle", min_pt=14)
 
 
@@ -128,14 +143,20 @@ def _footer(c: Canvas, n: int, pal: Palette) -> None:
            name="decor:slide-number", min_pt=9)
 
 
-def _content(c: Canvas, s: SlideModel, title: str, pal: Palette, cited: set[int]) -> None:
+def _content(c: Canvas, s: SlideModel, title: str, pal: Palette, cited: set[int], photo: Any = None) -> None:
+    from app.services.renderers.pptx_media import round_corners, split_for_photo
+
     _headline(c, title, pal)
+    body = BODY
+    if photo is not None:
+        body, photo_r = split_for_photo(BODY, 1.0)
+        round_corners(c.picture(photo_r, photo.path, name="content:image", alt=photo.alt_text))
     for b in s.blocks:
         cited.update(getattr(b, "source_ids", []) or [])
     if has_visual(s.blocks):
         draw_blocks(c, BODY, s.blocks, pal)
         return
-    if s.left and s.right:
+    if s.left and s.right and photo is None:
         for i, (items, r) in enumerate(zip((s.left, s.right), BODY.split_h(2, 0.4))):
             c.rect(r, pal.surface, f"decor:card-{i + 1}", rounded=True)
             paras = []
@@ -144,7 +165,7 @@ def _content(c: Canvas, s: SlideModel, title: str, pal: Palette, cited: set[int]
                 paras.append(BulletPara(_p(b.text + _cite(b.source_ids), 18 if b.level else 20, pal, bold=not b.level), level=b.level or None))
             c.text(r.inset(0.3, 0.25), paras, TextStyle(pal.text, bullet_color=pal.accent), name=f"content:column-{i + 1}", min_pt=12)
         return
-    items = s.bullets or s.left or s.right
+    items = s.bullets or s.left + s.right
     paras = []
     for b in items:
         cited.update(b.source_ids)
@@ -152,4 +173,4 @@ def _content(c: Canvas, s: SlideModel, title: str, pal: Palette, cited: set[int]
     if s.subtitle and not paras:
         paras = [BulletPara(_p(s.subtitle, 22, pal))]
     if paras:
-        c.text(BODY, paras, TextStyle(pal.text, bullet_color=pal.accent), name="content:body", min_pt=12)
+        c.text(body, paras, TextStyle(pal.text, bullet_color=pal.accent), name="content:body", min_pt=12)

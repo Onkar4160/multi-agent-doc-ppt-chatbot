@@ -42,3 +42,5 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+storage/fonts/*
+storage/outputs/*

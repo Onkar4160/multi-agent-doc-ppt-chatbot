@@ -57,6 +57,12 @@ class ConversationContext(BaseModel):
     last_target_nodes: list[str] = Field(
         default_factory=list, description="Target nodes from the most recent operation."
     )
+    transcript: list[dict[str, Any]] = Field(
+        default_factory=list, description="The whole conversation, condensed (user words kept, replies shortened)."
+    )
+    subject_history: list[str] = Field(
+        default_factory=list, description="Subjects of the conversation's deliverables, most recent first."
+    )
 
     @property
     def active_topic(self) -> str:
@@ -82,6 +88,8 @@ class ConversationContext(BaseModel):
             "active_artifact_id": self.active_artifact_id,
             "active_version_no": self.active_version_no,
             "last_target_nodes": self.last_target_nodes,
+            "transcript": self.transcript,
+            "subject_history": self.subject_history,
         }
 
     @classmethod
@@ -109,4 +117,6 @@ class ConversationContext(BaseModel):
             active_artifact_id=act_id,
             active_version_no=act_ver,
             last_target_nodes=data.get("last_target_nodes", []),
+            transcript=data.get("transcript", []),
+            subject_history=data.get("subject_history", []),
         )

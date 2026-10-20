@@ -90,13 +90,9 @@ class SectionBatch(BaseModel):
 
 
 def _org_identity(profile: TemplateProfile | None) -> str:
-    identity = ("Neutral, professional author. Do not assume or invent any specific company name or location unless "
-                "explicitly provided in the brief or evidence pack.")
-    if profile and profile.source_name:
-        clean = profile.source_name.replace(".docx", "").replace(".pptx", "").replace("_", " ").strip()
-        if clean and clean.lower() not in ("company proposal", "company template", "template", "default"):
-            identity = f"Organization / Brand: {clean}"
-    return identity
+    # A template's file name describes its look, not who is writing: it is never used as the organisation.
+    return ("Neutral, professional author. Do not assume or invent any specific company name or location unless "
+            "explicitly provided in the brief or evidence pack. Never use the template's name in the text.")
 
 
 def batches(plan: DocumentPlan) -> list[list[int]]:

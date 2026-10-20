@@ -87,7 +87,7 @@ class OpenverseProvider(ImageProvider):
     name = "openverse"
 
     def __init__(self, client: httpx.Client | None = None) -> None:
-        self.client = client or httpx.Client(timeout=30, headers=_HEADERS)
+        self.client = client or httpx.Client(timeout=httpx.Timeout(8.0, connect=5.0), headers=_HEADERS)
 
     def search(self, query: str, *, count: int = 5, wide: bool = True) -> list[ImageCandidate]:
         params = {"q": query, "page_size": str(count), "license_type": "commercial,modification", "mature": "false"}
@@ -124,7 +124,8 @@ class PexelsProvider(ImageProvider):
     name = "pexels"
 
     def __init__(self, api_key: str, client: httpx.Client | None = None) -> None:
-        self.client = client or httpx.Client(timeout=30, headers={**_HEADERS, "Authorization": api_key})
+        self.client = client or httpx.Client(timeout=httpx.Timeout(8.0, connect=5.0),
+                                             headers={**_HEADERS, "Authorization": api_key})
 
     def search(self, query: str, *, count: int = 5, wide: bool = True) -> list[ImageCandidate]:
         params = {"query": query, "per_page": str(count)}
@@ -199,15 +200,20 @@ def resolve_photo(
     used: set[str],
     cache: dict[str, list[ImageCandidate]],
     alt_text: str = "",
+    shorten: bool = True,
 ) -> PhotoAsset | None:
     """Best unused photo for ``query``: most relevant first (query words in the title), then ~1800 px wide."""
     candidates: list[ImageCandidate] = []
-    for q in _queries(query):  # long titles often match nothing; shorter forms of the topic do
+    for q in (_queries(query) if shorten else [query]):  # long titles often match nothing; shorter forms do
+        if getattr(provider, "down", False):
+            return None
         try:
             if q not in cache:
                 cache[q] = provider.search(q, count=8)
         except ImageError as exc:
             logger.warning("Photo search skipped: %s", exc)
+            if "Timeout" in str(exc) or "ConnectError" in str(exc):
+                provider.down = True  # unreachable: the remaining slides would only wait for the same timeout
             return None
         candidates = [c for c in cache[q] if c.url not in used]
         if candidates:
@@ -232,36 +238,109 @@ def resolve_photo(
     return None
 
 
-def fetch_deck_photos(
-    deck: Any, template_path: Any, profile: Any, out_dir: Path, *, provider: ImageProvider | None = None
-) -> dict[int, PhotoAsset]:
-    """Photos for the slides whose template design has a photo frame (cover first), no photo used twice.
+_NO_PHOTO = {"title", "agenda", "section", "summary", "closing", "references", "chart", "table", "kpi", "timeline",
+             "process", "comparison", "quote"}
 
-    Returns ``{index in deck.slides: PhotoAsset}``; empty when images are off or the template has no frames.
+
+def _text_light(slide: Any) -> bool:
+    """A points slide with room for a picture beside its text (2-4 short points)."""
+    from app.services.renderers.pptx_archetypes import has_visual
+
+    if slide.role != "title_content" or (slide.archetype or "bullets") in _NO_PHOTO or has_visual(slide.blocks):
+        return False
+    words = sum(len(b.text.split()) for b in slide.bullets)
+    return 2 <= len(slide.bullets) <= 4 and words <= 64
+
+
+def photo_targets(deck: Any, template_path: Any, profile: Any, limit: int) -> list[int]:
+    """Slides that will show a photo, in priority order: the template's own photo slots (cover first), the cover
+    of a generated design, slides planned around an image, then text-light slides spread through the deck."""
+    from app.services.ir_compat import legacy_view
+    from app.services.renderers.pptx_clone import photo_slide_indices
+    from app.services.slide_polish import polish_deck
+
+    view = legacy_view(polish_deck(deck.model_copy(deep=True)))
+    chosen: list[int] = list(photo_slide_indices(deck, template_path, profile)) if template_path else []
+    if template_path is None and deck.slides and deck.slides[0].role == "title":
+        chosen.insert(0, 0)
+    chosen += [i for i, s in enumerate(deck.slides)
+               if s.archetype == "image_text" or any(getattr(b, "type", "") == "image" for b in s.blocks)]
+    for i, s in enumerate(view.slides):
+        if len(dict.fromkeys(chosen)) >= limit:
+            break
+        if i not in chosen and _text_light(s) and all(abs(i - j) >= 2 for j in chosen if j > 0):
+            chosen.append(i)  # never two photo slides in a row: pictures punctuate the deck
+    return list(dict.fromkeys(chosen))[:limit]
+
+
+def slide_queries(slide: Any, subject: str) -> list[str]:
+    """Search queries for one slide's photo: what the slide is about within the subject, then the subject alone."""
+    from app.services.conversation_memory import content_words
+
+    image = next((b for b in getattr(slide, "blocks", []) if getattr(b, "type", "") == "image"), None)
+    subject = " ".join((subject or "").replace(":", " ").split()[:6])
+    known = {w.lower() for w in content_words(subject)}
+    focus = [w for w in content_words(image.description if image is not None and image.description else slide.title)
+             if w.lower() not in known and not w.isdigit()][:3]
+    queries = [f"{subject} {' '.join(focus)}".strip(), " ".join(focus), subject]
+    return [q for q in dict.fromkeys(queries) if q]
+
+
+def fetch_deck_photos(
+    deck: Any, template_path: Any, profile: Any, out_dir: Path, *, provider: ImageProvider | None = None,
+    subject: str = "", existing: dict[int, PhotoAsset] | None = None,
+) -> dict[int, PhotoAsset]:
+    """A relevant photo for each slide that will show one (``photo_targets``), no photo used twice.
+
+    Each slide's photo is searched for what that slide says (its headline within the deck's subject), not the
+    deck title alone. ``existing`` photos (from the version being edited) are kept and not searched again.
+    Returns ``{index in deck.slides: PhotoAsset}``; empty when images are off.
     """
     from app.core.config import get_settings
-    from app.services.renderers.pptx_clone import photo_slide_indices
 
     settings = get_settings()
+    photos: dict[int, PhotoAsset] = dict(existing or {})
     own_provider = provider is None
     provider = provider or build_image_provider(settings)
     if provider is None:
-        return {}
+        return photos
     try:
-        wanted = photo_slide_indices(deck, template_path, profile)[: settings.max_deck_images]
-        topic = " ".join(deck.title.replace(":", " ").split()[:6])
+        wanted = [i for i in photo_targets(deck, template_path, profile, settings.max_deck_images) if i not in photos]
+        subject = subject or deck.title
         used: set[str] = set()
         cache: dict[str, list[ImageCandidate]] = {}
-        photos: dict[int, PhotoAsset] = {}
-        for index in wanted:
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        lock = threading.Lock()
+
+        def one(index: int) -> PhotoAsset | None:
             slide = deck.slides[index]
-            photo = resolve_photo(topic, provider, out_dir, used=used, cache=cache, alt_text=f"Photo illustrating {slide.title}")
-            if photo is not None:
-                photos[index] = photo
+            queries = [subject] if index == 0 and slide.role == "title" else slide_queries(slide, subject)
+            for n, q in enumerate(queries, start=1):  # the slide's own focus first; shortened forms only at the end
+                try:
+                    candidates = provider.search(q, count=8) if not getattr(provider, "down", False) else []
+                except ImageError as exc:
+                    logger.warning("Photo search skipped: %s", exc)
+                    provider.down = "Timeout" in str(exc) or "ConnectError" in str(exc)
+                    return None
+                with lock:
+                    cache[q] = candidates
+                    photo = resolve_photo(q, provider, out_dir, used=used, cache=cache, shorten=False,
+                                          alt_text=f"Photo illustrating {slide.title}")
+                if photo is not None:
+                    return photo
+            return None
+
+        # Slides are searched side by side; downloads and the no-duplicate check stay serialised by the lock.
+        with ThreadPoolExecutor(max_workers=max(1, min(4, len(wanted)))) as pool:
+            for index, photo in zip(wanted, pool.map(one, wanted)):
+                if photo is not None:
+                    photos[index] = photo
         return photos
     except Exception as exc:  # photos are a bonus: a deck without them is still a deck
         logger.warning("Deck photos skipped: %s", exc)
-        return {}
+        return photos
     finally:
         if own_provider:
             provider.close()

@@ -281,7 +281,8 @@ def test_ambiguity_rule_multiple_candidate_templates():
     """Section 8 Ambiguity Rule:
     User attaches template1.docx and template2.docx.
     Prompt: 'Create a proposal using the attached files.'
-    The system should identify ambiguity rather than silently picking one.
+    The ambiguity is recorded, but it never stops the request (the user's rule: a template question must not block
+    delivery): template resolution picks the best candidate and the reply names the one used.
     """
     mock_files = [
         {"id": 201, "filename": "template1.docx", "file_type": "docx"},
@@ -296,6 +297,5 @@ def test_ambiguity_rule_multiple_candidate_templates():
     with patch("app.services.file_classifier.classify_attached_files", return_value=classifications):
         plan = parse_plan(prompt, file_ids=[201, 202])
 
-    assert plan.error == "AMBIGUOUS_TEMPLATES"
-    assert "template1.docx" in plan.reasoning
-    assert "template2.docx" in plan.reasoning
+    assert plan.error is None
+    assert plan.output_requirements["template_choice_from"] == ["template1.docx", "template2.docx"]

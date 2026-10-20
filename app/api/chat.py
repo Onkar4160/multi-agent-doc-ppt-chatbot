@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import re
 from datetime import datetime
 import uuid
@@ -90,6 +91,7 @@ def _run_graph_background(
         "kind_hint": kind_hint,
         "pending_clarification": pending_clarification,
         "raw_message": raw_message or user_message,
+        "started_at": time.monotonic(),
     }
 
     with run_context(run_id), track_run(get_settings().llm_max_calls_per_run) as usage:

@@ -65,6 +65,7 @@ ADDED_COLUMNS = (
     ("artifacts", "task_id", "INTEGER"),
     ("artifact_versions", "quality_json", "TEXT"),
     ("artifact_versions", "dossier_id", "INTEGER"),
+    ("artifact_versions", "render_json", "TEXT"),
     ("template_profile_records", "sha256", "VARCHAR(64)"),
     ("template_profile_records", "analyzer_version", "INTEGER"),
 )
